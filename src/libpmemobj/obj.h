@@ -129,7 +129,9 @@ struct pmemobjpool {
 
 	struct stats_persistent stats_persistent;
 
-	char pmem_reserved[496]; /* must be zeroed */
+	uint64_t shadow_mem_offset;
+
+	char pmem_reserved[488]; /* must be zeroed */
 
 	/* some run-time state, allocated out of memory pool... */
 	void *addr;		/* mapped region */

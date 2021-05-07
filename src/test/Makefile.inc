@@ -90,7 +90,9 @@ OBJS += $(TOP)/src/debug/libpmemobj/alloc_class.o\
 	$(TOP)/src/debug/libpmemobj/ulog.o\
 	$(TOP)/src/debug/libpmemobj/sync.o\
 	$(TOP)/src/debug/libpmemobj/tx.o\
-	$(TOP)/src/debug/libpmemobj/stats.o
+	$(TOP)/src/debug/libpmemobj/stats.o\
+	$(TOP)/src/debug/libpmemobj/asan.o\
+	$(TOP)/src/debug/libpmemobj/asan_overmap.o
 
 INCS += -I$(TOP)/src/libpmemobj
 endif
@@ -117,7 +119,9 @@ OBJS +=	$(TOP)/src/nondebug/libpmemobj/alloc_class.o\
 	$(TOP)/src/nondebug/libpmemobj/ulog.o\
 	$(TOP)/src/nondebug/libpmemobj/sync.o\
 	$(TOP)/src/nondebug/libpmemobj/tx.o\
-	$(TOP)/src/nondebug/libpmemobj/stats.o
+	$(TOP)/src/nondebug/libpmemobj/stats.o\
+	$(TOP)/src/nondebug/libpmemobj/asan.o\
+	$(TOP)/src/nondebug/libpmemobj/asan_overmap.o
 
 INCS += -I$(TOP)/src/libpmemobj
 endif

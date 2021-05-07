@@ -27,6 +27,7 @@
 #include "sync.h"
 #include "tx.h"
 #include "sys_util.h"
+#include "asan_overmap.h"
 
 /*
  * The variable from which the config is directly loaded. The string
@@ -891,8 +892,37 @@ obj_descr_create(PMEMobjpool *pop, const char *layout, size_t poolsize)
 	/* zero all lanes */
 	lane_init_data(pop);
 
-	pop->heap_offset = pop->lanes_offset +
+	pop->shadow_mem_offset = pop->lanes_offset + 
 		pop->nlanes * sizeof(struct lane_layout);
+	pop->shadow_mem_offset = (pop->shadow_mem_offset + 8*Pagesize - 1) & ~(8*Pagesize - 1);
+
+	pmemops_persist(p_ops, &pop->shadow_mem_offset, sizeof(pop->shadow_mem_offset));
+
+	/*
+	 * Zero-out the persistent shadow memory
+	 * It's safe to use PMEMOBJ_F_RELAXED flag because the shadow memory
+	 * must be entirely zeroed and it is already 8-byte padded.
+	 */
+	pmemops_memset(p_ops, (char*)pop + pop->shadow_mem_offset, 0,
+		pop->set->poolsize/8, PMEMOBJ_F_RELAXED);
+
+	//uint8_t* vmem_shadow_mem_start = (uint8_t*)D_RW(rootp->shadow_mem);
+	// Mark the red zone within the persistent shadow mem
+	// The red zone corresponding to the volatile persistent memory range is marked non-accessible on a page permission level, because filling the red zone with -1 would allocate physical memory.
+	// But we simply set it to -1
+	// TODO: For portions of the persistent shadow memory that correspond to itself, avoid marking them -1 and instead mark them no read/write using page permissions.
+	//       Just like the regular ASan
+	//pmemobj_memset_persist(pool, vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, detail::TAG::INTERNAL, shadow_size/8); // Note that because of the overmapping, the change will be mirrored to the overmapped shadow memory.
+	// This is disabled for now, because:
+	// During transactional memory operations we need to add parts of the shadow memory to the undo log.
+	// Adding the shadow memory to the transaction undo log causes libpmemobj
+	//  to copy it, using memcpy. This call gets intercepted and instrumented by ASan.
+	//  Because the persistent shadow memory (in the original file mapping) is marked inaccessible,
+	//    ASan memcpy raises an error.
+	//detail::mymemset(vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, detail::TAG::INTERNAL, shadow_size/8);
+	//pmemobj_persist(pool, vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, shadow_size/8);
+
+	pop->heap_offset = pop->shadow_mem_offset + pop->set->poolsize/8;
 	pop->heap_offset = (pop->heap_offset + Pagesize - 1) & ~(Pagesize - 1);
 
 	size_t heap_size = pop->set->poolsize - pop->heap_offset;
@@ -1256,6 +1286,8 @@ obj_runtime_init(PMEMobjpool *pop, int rdonly, int boot, unsigned nlanes)
 	 */
 	RANGE_NONE(pop->addr, sizeof(struct pool_hdr), pop->is_dev_dax);
 
+	pmemobj_asan_overmap((uint8_t*)pop->addr, (uint8_t*)pop->addr + pop->set->poolsize, pop->set->replica[0]->part[0].fd, (off_t)pop->shadow_mem_offset);
+
 	return 0;
 
 err_user_buffers_map:
@@ -1495,6 +1527,13 @@ obj_check_basic_local(PMEMobjpool *pop, size_t mapped_size)
 		consistent = 0;
 	}
 
+	// Check that there exists a shadow memory
+	if (pop->shadow_mem_offset < sizeof(struct pmemobjpool) || pop->shadow_mem_offset >= pop->set->poolsize) {
+		LOG(2, "!shadow_mem_check");
+		errno = -1;
+		consistent = 0;
+	}
+
 	return consistent;
 }
 
@@ -1555,6 +1594,13 @@ obj_check_basic_remote(PMEMobjpool *pop, size_t mapped_size)
 	if (palloc_heap_check_remote((char *)pop + pop->heap_offset,
 			heap_size, &pop->p_ops.remote)) {
 		LOG(2, "!heap_check_remote");
+		consistent = 0;
+	}
+
+	// Check that there exists a shadow memory
+	if (pop->shadow_mem_offset < sizeof(struct pmemobjpool) || pop->shadow_mem_offset >= pop->set->poolsize) {
+		LOG(2, "!shadow_mem_check");
+		errno = -1;
 		consistent = 0;
 	}
 
