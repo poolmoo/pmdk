@@ -17,41 +17,12 @@
 #include "valgrind_internal.h"
 #include "memops.h"
 #include "asan.h"
-
-struct tx_data {
-	PMDK_SLIST_ENTRY(tx_data) tx_entry;
-	jmp_buf env;
-	enum pobj_tx_failure_behavior failure_behavior;
-};
-
-struct tx {
-	PMEMobjpool *pop;
-	enum pobj_tx_stage stage;
-	int last_errnum;
-	struct lane *lane;
-	PMDK_SLIST_HEAD(txl, tx_lock_data) tx_locks;
-	PMDK_SLIST_HEAD(txd, tx_data) tx_entries;
-
-	struct ravl *ranges;
-
-	VEC(, struct pobj_action) actions;
-	VEC(, struct user_buffer_def) redo_userbufs;
-	size_t redo_userbufs_capacity;
-
-	pmemobj_tx_callback stage_callback;
-	void *stage_callback_arg;
-
-	int first_snapshot;
-
-	void *user_data;
-};
-
 /*
  * get_tx -- (internal) returns current transaction
  *
  * This function should be used only in high-level functions.
  */
-static struct tx *
+struct tx *
 get_tx()
 {
 	static __thread struct tx tx;
@@ -78,12 +49,6 @@ struct tx_alloc_args {
 
 #define ALLOC_ARGS(flags)\
 (struct tx_alloc_args){flags, NULL, 0}
-
-struct tx_range_def {
-	uint64_t offset;
-	uint64_t size;
-	uint64_t flags;
-};
 
 /*
  * tx_range_def_cmp -- compares two snapshot ranges
@@ -567,15 +532,253 @@ tx_lane_ranges_insert_def(PMEMobjpool *pop, struct tx *tx,
 }
 
 /*
+ * vg_verify_initialized -- when executed under Valgrind verifies that
+ *   the buffer has been initialized; explicit check at snapshotting time,
+ *   because Valgrind may find it much later when it's impossible to tell
+ *   for which snapshot it triggered
+ */
+static void
+vg_verify_initialized(PMEMobjpool *pop, const struct tx_range_def *def)
+{
+#if VG_MEMCHECK_ENABLED
+	if (!On_memcheck)
+		return;
+
+	VALGRIND_DO_DISABLE_ERROR_REPORTING;
+	char *start = (char *)pop + def->offset;
+	char *uninit = (char *)VALGRIND_CHECK_MEM_IS_DEFINED(start, def->size);
+	if (uninit) {
+		VALGRIND_PRINTF(
+			"Snapshotting uninitialized data in range <%p,%p> (<offset:0x%lx,size:0x%lx>)\n",
+			start, start + def->size, def->offset, def->size);
+
+		if (uninit != start)
+			VALGRIND_PRINTF("Uninitialized data starts at: %p\n",
+					uninit);
+
+		VALGRIND_DO_ENABLE_ERROR_REPORTING;
+		VALGRIND_CHECK_MEM_IS_DEFINED(start, def->size);
+	} else {
+		VALGRIND_DO_ENABLE_ERROR_REPORTING;
+	}
+#endif
+}
+
+/*
+ * pmemobj_tx_add_snapshot -- (internal) creates a variably sized snapshot
+ */
+static int
+pmemobj_tx_add_snapshot(struct tx *tx, struct tx_range_def *snapshot)
+{
+	/*
+	 * Depending on the size of the block, either allocate an
+	 * entire new object or use cache.
+	 */
+	void *ptr = OBJ_OFF_TO_PTR(tx->pop, snapshot->offset);
+
+	VALGRIND_ADD_TO_TX(ptr, snapshot->size);
+
+	/* do nothing */
+	if (snapshot->flags & POBJ_XADD_NO_SNAPSHOT)
+		return 0;
+
+	if (!(snapshot->flags & POBJ_XADD_ASSUME_INITIALIZED))
+		vg_verify_initialized(tx->pop, snapshot);
+
+	/*
+	 * If we are creating the first snapshot, setup a redo log action to
+	 * increment counter in the undo log, so that the log becomes
+	 * invalid once the redo log is processed.
+	 */
+	if (tx->first_snapshot) {
+		struct pobj_action *action = tx_action_add(tx);
+		if (action == NULL)
+			return -1;
+
+		uint64_t *n = &tx->lane->layout->undo.gen_num;
+		palloc_set_value(&tx->pop->heap, action,
+			n, *n + 1);
+
+		tx->first_snapshot = 0;
+	}
+
+	return operation_add_buffer(tx->lane->undo, ptr, ptr, snapshot->size,
+		ULOG_OPERATION_BUF_CPY);
+}
+
+/*
+ * pmemobj_tx_merge_flags -- (internal) common code for merging flags between
+ * two ranges to ensure resultant behavior is correct
+ */
+static void
+pmemobj_tx_merge_flags(struct tx_range_def *dest, struct tx_range_def *merged)
+{
+	/*
+	 * POBJ_XADD_NO_FLUSH should only be set in merged range if set in
+	 * both ranges
+	 */
+	if ((dest->flags & POBJ_XADD_NO_FLUSH) &&
+				!(merged->flags & POBJ_XADD_NO_FLUSH)) {
+		dest->flags = dest->flags & (~POBJ_XADD_NO_FLUSH);
+	}
+}
+
+int
+pmemobj_tx_add_common_no_check(struct tx *tx, struct tx_range_def *args)
+{
+	int ret = 0;
+
+	/*
+	 * Search existing ranges backwards starting from the end of the
+	 * snapshot.
+	 */
+	struct tx_range_def r = *args;
+	struct tx_range_def search = {0, 0, 0};
+	/*
+	 * If the range is directly adjacent to an existing one,
+	 * they can be merged, so search for less or equal elements.
+	 */
+	enum ravl_predicate p = RAVL_PREDICATE_LESS_EQUAL;
+	struct ravl_node *nprev = NULL;
+	while (r.size != 0) {
+		search.offset = r.offset + r.size;
+		struct ravl_node *n = ravl_find(tx->ranges, &search, p);
+		/*
+		 * We have to skip searching for LESS_EQUAL because
+		 * the snapshot we would find is the one that was just
+		 * created.
+		 */
+		p = RAVL_PREDICATE_LESS;
+
+		struct tx_range_def *f = n ? ravl_data(n) : NULL;
+
+		size_t fend = f == NULL ? 0: f->offset + f->size;
+		size_t rend = r.offset + r.size;
+		if (fend == 0 || fend < r.offset) {
+			/*
+			 * If found no range or the found range is not
+			 * overlapping or adjacent on the left side, we can just
+			 * create the entire r.offset + r.size snapshot.
+			 *
+			 * Snapshot:
+			 *	--+-
+			 * Existing ranges:
+			 *	---- (no ranges)
+			 * or	+--- (no overlap)
+			 * or	---+ (adjacent on on right side)
+			 */
+			if (nprev != NULL) {
+				/*
+				 * But, if we have an existing adjacent snapshot
+				 * on the right side, we can just extend it to
+				 * include the desired range.
+				 */
+				struct tx_range_def *fprev = ravl_data(nprev);
+				ASSERTeq(rend, fprev->offset);
+				fprev->offset -= r.size;
+				fprev->size += r.size;
+			} else {
+				/*
+				 * If we don't have anything adjacent, create
+				 * a new range in the tree.
+				 */
+				ret = tx_lane_ranges_insert_def(tx->pop,
+					tx, &r);
+				if (ret != 0)
+					break;
+			}
+			ret = pmemobj_tx_add_snapshot(tx, &r);
+			break;
+		} else if (fend <= rend) {
+			/*
+			 * If found range has its end inside of the desired
+			 * snapshot range, we can extend the found range by the
+			 * size leftover on the left side.
+			 *
+			 * Snapshot:
+			 *	--+++--
+			 * Existing ranges:
+			 *	+++---- (overlap on left)
+			 * or	---+--- (found snapshot is inside)
+			 * or	---+-++ (inside, and adjacent on the right)
+			 * or	+++++-- (desired snapshot is inside)
+			 *
+			 */
+			struct tx_range_def snapshot = *args;
+			snapshot.offset = fend;
+			/* the side not yet covered by an existing snapshot */
+			snapshot.size = rend - fend;
+
+			/* the number of bytes intersecting in both ranges */
+			size_t intersection = fend - MAX(f->offset, r.offset);
+			r.size -= intersection + snapshot.size;
+			f->size += snapshot.size;
+			pmemobj_tx_merge_flags(f, args);
+
+			if (snapshot.size != 0) {
+				ret = pmemobj_tx_add_snapshot(tx, &snapshot);
+				if (ret != 0)
+					break;
+			}
+
+			/*
+			 * If there's a snapshot adjacent on right side, merge
+			 * the two ranges together.
+			 */
+			if (nprev != NULL) {
+				struct tx_range_def *fprev = ravl_data(nprev);
+				ASSERTeq(rend, fprev->offset);
+				f->size += fprev->size;
+				pmemobj_tx_merge_flags(f, fprev);
+				ravl_remove(tx->ranges, nprev);
+			}
+		} else if (fend >= r.offset) {
+			/*
+			 * If found range has its end extending beyond the
+			 * desired snapshot.
+			 *
+			 * Snapshot:
+			 *	--+++--
+			 * Existing ranges:
+			 *	-----++ (adjacent on the right)
+			 * or	----++- (overlapping on the right)
+			 * or	----+++ (overlapping and adjacent on the right)
+			 * or	--+++++ (desired snapshot is inside)
+			 *
+			 * Notice that we cannot create a snapshot based solely
+			 * on this information without risking overwriting an
+			 * existing one. We have to continue iterating, but we
+			 * keep the information about adjacent snapshots in the
+			 * nprev variable.
+			 */
+			size_t overlap = rend - MAX(f->offset, r.offset);
+			r.size -= overlap;
+			pmemobj_tx_merge_flags(f, args);
+		} else {
+			ASSERT(0);
+		}
+
+		nprev = n;
+	}
+
+	if (ret != 0) {
+		ERR("out of memory");
+		return obj_tx_fail_err(ENOMEM, args->flags);
+	}
+
+	return 0;
+}
+
+/*
  * tx_alloc_common -- (internal) common function for alloc and zalloc
  */
 static PMEMoid
-tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
+tx_alloc_common(struct tx *tx, size_t provided_size, type_num_t type_num,
 		palloc_constr constructor, struct tx_alloc_args args)
 {
 	LOG(3, NULL);
 
-	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+	if (provided_size > PMEMOBJ_MAX_ALLOC_SIZE) {
 		ERR("requested size too large");
 		return obj_tx_fail_null(ENOMEM, args.flags);
 	}
@@ -586,7 +789,7 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 	if (action == NULL)
 		return obj_tx_fail_null(ENOMEM, args.flags);
 
-	if (palloc_reserve(&pop->heap, size, constructor, &args, type_num, 0,
+	if (palloc_reserve(&pop->heap, provided_size, constructor, &args, type_num, 0,
 		CLASS_ID_FROM_FLAG(args.flags),
 		ARENA_ID_FROM_FLAG(args.flags), action) != 0)
 		goto err_oom;
@@ -595,11 +798,17 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 	PMEMoid retoid = OID_NULL;
 	retoid.off = action->heap.offset;
 	retoid.pool_uuid_lo = pop->uuid_lo;
-	size = action->heap.usable_size;
+	size_t usable_size = action->heap.usable_size;
 
-	const struct tx_range_def r = {retoid.off, size, args.flags};
+	const struct tx_range_def r = {retoid.off, usable_size, args.flags};
 	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
 		goto err_oom;
+
+	int res = pmemobj_asan_tag_mem_tx(retoid.off, provided_size, pmemobj_asan_ADDRESSABLE);
+	if (res) {
+		tx_action_remove(tx);
+		return obj_tx_fail_null(res, args.flags);
+	}
 
 	return retoid;
 
@@ -1116,244 +1325,6 @@ pmemobj_tx_process(void)
 }
 
 /*
- * vg_verify_initialized -- when executed under Valgrind verifies that
- *   the buffer has been initialized; explicit check at snapshotting time,
- *   because Valgrind may find it much later when it's impossible to tell
- *   for which snapshot it triggered
- */
-static void
-vg_verify_initialized(PMEMobjpool *pop, const struct tx_range_def *def)
-{
-#if VG_MEMCHECK_ENABLED
-	if (!On_memcheck)
-		return;
-
-	VALGRIND_DO_DISABLE_ERROR_REPORTING;
-	char *start = (char *)pop + def->offset;
-	char *uninit = (char *)VALGRIND_CHECK_MEM_IS_DEFINED(start, def->size);
-	if (uninit) {
-		VALGRIND_PRINTF(
-			"Snapshotting uninitialized data in range <%p,%p> (<offset:0x%lx,size:0x%lx>)\n",
-			start, start + def->size, def->offset, def->size);
-
-		if (uninit != start)
-			VALGRIND_PRINTF("Uninitialized data starts at: %p\n",
-					uninit);
-
-		VALGRIND_DO_ENABLE_ERROR_REPORTING;
-		VALGRIND_CHECK_MEM_IS_DEFINED(start, def->size);
-	} else {
-		VALGRIND_DO_ENABLE_ERROR_REPORTING;
-	}
-#endif
-}
-
-/*
- * pmemobj_tx_add_snapshot -- (internal) creates a variably sized snapshot
- */
-static int
-pmemobj_tx_add_snapshot(struct tx *tx, struct tx_range_def *snapshot)
-{
-	/*
-	 * Depending on the size of the block, either allocate an
-	 * entire new object or use cache.
-	 */
-	void *ptr = OBJ_OFF_TO_PTR(tx->pop, snapshot->offset);
-
-	VALGRIND_ADD_TO_TX(ptr, snapshot->size);
-
-	/* do nothing */
-	if (snapshot->flags & POBJ_XADD_NO_SNAPSHOT)
-		return 0;
-
-	if (!(snapshot->flags & POBJ_XADD_ASSUME_INITIALIZED))
-		vg_verify_initialized(tx->pop, snapshot);
-
-	/*
-	 * If we are creating the first snapshot, setup a redo log action to
-	 * increment counter in the undo log, so that the log becomes
-	 * invalid once the redo log is processed.
-	 */
-	if (tx->first_snapshot) {
-		struct pobj_action *action = tx_action_add(tx);
-		if (action == NULL)
-			return -1;
-
-		uint64_t *n = &tx->lane->layout->undo.gen_num;
-		palloc_set_value(&tx->pop->heap, action,
-			n, *n + 1);
-
-		tx->first_snapshot = 0;
-	}
-
-	return operation_add_buffer(tx->lane->undo, ptr, ptr, snapshot->size,
-		ULOG_OPERATION_BUF_CPY);
-}
-
-/*
- * pmemobj_tx_merge_flags -- (internal) common code for merging flags between
- * two ranges to ensure resultant behavior is correct
- */
-static void
-pmemobj_tx_merge_flags(struct tx_range_def *dest, struct tx_range_def *merged)
-{
-	/*
-	 * POBJ_XADD_NO_FLUSH should only be set in merged range if set in
-	 * both ranges
-	 */
-	if ((dest->flags & POBJ_XADD_NO_FLUSH) &&
-				!(merged->flags & POBJ_XADD_NO_FLUSH)) {
-		dest->flags = dest->flags & (~POBJ_XADD_NO_FLUSH);
-	}
-}
-
-static int
-pmemobj_tx_add_common_no_check(struct tx *tx, struct tx_range_def *args)
-{
-	int ret = 0;
-
-	/*
-	 * Search existing ranges backwards starting from the end of the
-	 * snapshot.
-	 */
-	struct tx_range_def r = *args;
-	struct tx_range_def search = {0, 0, 0};
-	/*
-	 * If the range is directly adjacent to an existing one,
-	 * they can be merged, so search for less or equal elements.
-	 */
-	enum ravl_predicate p = RAVL_PREDICATE_LESS_EQUAL;
-	struct ravl_node *nprev = NULL;
-	while (r.size != 0) {
-		search.offset = r.offset + r.size;
-		struct ravl_node *n = ravl_find(tx->ranges, &search, p);
-		/*
-		 * We have to skip searching for LESS_EQUAL because
-		 * the snapshot we would find is the one that was just
-		 * created.
-		 */
-		p = RAVL_PREDICATE_LESS;
-
-		struct tx_range_def *f = n ? ravl_data(n) : NULL;
-
-		size_t fend = f == NULL ? 0: f->offset + f->size;
-		size_t rend = r.offset + r.size;
-		if (fend == 0 || fend < r.offset) {
-			/*
-			 * If found no range or the found range is not
-			 * overlapping or adjacent on the left side, we can just
-			 * create the entire r.offset + r.size snapshot.
-			 *
-			 * Snapshot:
-			 *	--+-
-			 * Existing ranges:
-			 *	---- (no ranges)
-			 * or	+--- (no overlap)
-			 * or	---+ (adjacent on on right side)
-			 */
-			if (nprev != NULL) {
-				/*
-				 * But, if we have an existing adjacent snapshot
-				 * on the right side, we can just extend it to
-				 * include the desired range.
-				 */
-				struct tx_range_def *fprev = ravl_data(nprev);
-				ASSERTeq(rend, fprev->offset);
-				fprev->offset -= r.size;
-				fprev->size += r.size;
-			} else {
-				/*
-				 * If we don't have anything adjacent, create
-				 * a new range in the tree.
-				 */
-				ret = tx_lane_ranges_insert_def(tx->pop,
-					tx, &r);
-				if (ret != 0)
-					break;
-			}
-			ret = pmemobj_tx_add_snapshot(tx, &r);
-			break;
-		} else if (fend <= rend) {
-			/*
-			 * If found range has its end inside of the desired
-			 * snapshot range, we can extend the found range by the
-			 * size leftover on the left side.
-			 *
-			 * Snapshot:
-			 *	--+++--
-			 * Existing ranges:
-			 *	+++---- (overlap on left)
-			 * or	---+--- (found snapshot is inside)
-			 * or	---+-++ (inside, and adjacent on the right)
-			 * or	+++++-- (desired snapshot is inside)
-			 *
-			 */
-			struct tx_range_def snapshot = *args;
-			snapshot.offset = fend;
-			/* the side not yet covered by an existing snapshot */
-			snapshot.size = rend - fend;
-
-			/* the number of bytes intersecting in both ranges */
-			size_t intersection = fend - MAX(f->offset, r.offset);
-			r.size -= intersection + snapshot.size;
-			f->size += snapshot.size;
-			pmemobj_tx_merge_flags(f, args);
-
-			if (snapshot.size != 0) {
-				ret = pmemobj_tx_add_snapshot(tx, &snapshot);
-				if (ret != 0)
-					break;
-			}
-
-			/*
-			 * If there's a snapshot adjacent on right side, merge
-			 * the two ranges together.
-			 */
-			if (nprev != NULL) {
-				struct tx_range_def *fprev = ravl_data(nprev);
-				ASSERTeq(rend, fprev->offset);
-				f->size += fprev->size;
-				pmemobj_tx_merge_flags(f, fprev);
-				ravl_remove(tx->ranges, nprev);
-			}
-		} else if (fend >= r.offset) {
-			/*
-			 * If found range has its end extending beyond the
-			 * desired snapshot.
-			 *
-			 * Snapshot:
-			 *	--+++--
-			 * Existing ranges:
-			 *	-----++ (adjacent on the right)
-			 * or	----++- (overlapping on the right)
-			 * or	----+++ (overlapping and adjacent on the right)
-			 * or	--+++++ (desired snapshot is inside)
-			 *
-			 * Notice that we cannot create a snapshot based solely
-			 * on this information without risking overwriting an
-			 * existing one. We have to continue iterating, but we
-			 * keep the information about adjacent snapshots in the
-			 * nprev variable.
-			 */
-			size_t overlap = rend - MAX(f->offset, r.offset);
-			r.size -= overlap;
-			pmemobj_tx_merge_flags(f, args);
-		} else {
-			ASSERT(0);
-		}
-
-		nprev = n;
-	}
-
-	if (ret != 0) {
-		ERR("out of memory");
-		return obj_tx_fail_err(ENOMEM, args->flags);
-	}
-
-	return 0;
-}
-
-/*
  * pmemobj_tx_add_common -- (internal) common code for adding persistent memory
  * into the transaction
  */
@@ -1795,29 +1766,6 @@ pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num)
 	return pmemobj_tx_xwcsdup(s, type_num, 0);
 }
 
-static int
-pmemobj_tx_asan_freed(struct tx* tx, uint64_t off, size_t size) {
-	size_t shadow_modification_size = (size+7)/8 + off%8;
-
-	struct tx_range_def args = {
-		.offset = tx->pop->shadow_mem_offset + off/8,
-		.size = shadow_modification_size,
-		.flags = 0,
-	};
-
-	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
-	//              use a custom ulog operation to save persistent memory
-	int ret = pmemobj_tx_add_common_no_check(tx, &args);
-	if (ret) {
-		return ret;
-	}
-
-	void *ptr = OBJ_OFF_TO_PTR(tx->pop, off);
-	pmemobj_asan_mark_mem(ptr, size, pmemobj_asan_FREED);
-
-	return 0;
-}
-
 /*
  * pmemobj_tx_xfree -- frees an existing object, with no_abort option
  */
@@ -1879,7 +1827,7 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 				palloc_cancel(&pop->heap, action, 1);
 				VEC_ERASE_BY_PTR(&tx->actions, action);
 
-				int ret = pmemobj_tx_asan_freed(tx, oid.off, r->size);
+				int ret = pmemobj_asan_tag_mem_tx(oid.off, r->size, pmemobj_asan_FREED);
 				if (ret) {
 					obj_tx_fail_err(ret, flags);
 				}
@@ -1900,7 +1848,7 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 	size_t size = palloc_usable_size(&pop->heap, oid.off);
 	palloc_defer_free(&pop->heap, oid.off, action);
 
-	int ret = pmemobj_tx_asan_freed(tx, oid.off, size);
+	int ret = pmemobj_asan_tag_mem_tx(oid.off, size, pmemobj_asan_FREED);
 	if (ret) {
 		obj_tx_fail_err(ret, flags);
 	}

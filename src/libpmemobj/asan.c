@@ -1,4 +1,5 @@
 #include "asan.h"
+#include "tx.h"
 
 #include <assert.h>
 
@@ -50,4 +51,29 @@ void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
 		else
 			*shadow_pos = (uint8_t)prot;
 	}
+}
+
+int
+pmemobj_asan_tag_mem_tx(uint64_t off, size_t size, uint8_t tag) {
+	struct tx* tx = get_tx();
+
+	size_t shadow_modification_size = (size+7)/8 + off%8;
+
+	struct tx_range_def args = {
+		.offset = tx->pop->shadow_mem_offset + off/8,
+		.size = shadow_modification_size,
+		.flags = 0,
+	};
+
+	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
+	//              use a custom ulog operation to save persistent memory
+	int ret = pmemobj_tx_add_common_no_check(tx, &args);
+	if (ret) {
+		return ret;
+	}
+
+	void *ptr = (void *)((uintptr_t)tx->pop + off);
+	pmemobj_asan_mark_mem(ptr, size, tag);
+
+	return 0;
 }

@@ -28,7 +28,7 @@ INCS += -I../include -I../common/ -I../core/ $(OS_INCS)
 DEFAULT_CFLAGS += -std=gnu99
 DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror
-DEFAULT_CFLAGS += -Wmissing-prototypes
+#DEFAULT_CFLAGS += -Wmissing-prototypes
 DEFAULT_CFLAGS += -Wpointer-arith
 DEFAULT_CFLAGS += -Wsign-conversion
 DEFAULT_CFLAGS += -Wsign-compare

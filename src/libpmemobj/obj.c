@@ -28,6 +28,7 @@
 #include "tx.h"
 #include "sys_util.h"
 #include "asan_overmap.h"
+#include "asan.h"
 
 /*
  * The variable from which the config is directly loaded. The string
@@ -2964,6 +2965,24 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
 
 	PMEMOBJ_API_END();
+
+	// Mark the root object accessible in shadow memory
+	// kartal TODO: This is non-atomic. If the operation gets torn at this point,
+	//              we will have a root object that may be marked inaccessible/freed.
+	//				obj_alloc_root starts a transcation, but I am not familiar enough
+	//				with the library internals to utilize it, so I am starting a new,
+	//				user-level transaction here.
+
+	TX_BEGIN(pop) {
+
+		pmemobj_asan_tag_mem_tx(root.off, size, pmemobj_asan_ADDRESSABLE);
+
+	} TX_ONABORT {
+		ASSERT(false); // kartal TODO: do not assert
+	}
+
+	TX_END
+
 	return root;
 }
 

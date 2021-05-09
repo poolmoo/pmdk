@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include "obj.h"
 #include "ulog.h"
+#include "queue.h"
+#include "vec.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +43,44 @@ struct tx_parameters {
  * a transaction.
  */
 PMEMobjpool *tx_get_pop(void);
+
+struct tx_data {
+	PMDK_SLIST_ENTRY(tx_data) tx_entry;
+	jmp_buf env;
+	enum pobj_tx_failure_behavior failure_behavior;
+};
+
+struct tx {
+	PMEMobjpool *pop;
+	enum pobj_tx_stage stage;
+	int last_errnum;
+	struct lane *lane;
+	PMDK_SLIST_HEAD(txl, tx_lock_data) tx_locks;
+	PMDK_SLIST_HEAD(txd, tx_data) tx_entries;
+
+	struct ravl *ranges;
+
+	VEC(, struct pobj_action) actions;
+	VEC(, struct user_buffer_def) redo_userbufs;
+	size_t redo_userbufs_capacity;
+
+	pmemobj_tx_callback stage_callback;
+	void *stage_callback_arg;
+
+	int first_snapshot;
+
+	void *user_data;
+};
+
+struct tx * get_tx();
+
+struct tx_range_def {
+	uint64_t offset;
+	uint64_t size;
+	uint64_t flags;
+};
+
+int pmemobj_tx_add_common_no_check(struct tx *tx, struct tx_range_def *args);
 
 void tx_ctl_register(PMEMobjpool *pop);
 

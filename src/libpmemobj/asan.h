@@ -16,4 +16,6 @@ void pmemobj_asan_memset(uint8_t* start, uint8_t byt, size_t len);
 
 void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag);
 
+int pmemobj_asan_tag_mem_tx(uint64_t off, size_t size, uint8_t tag);
+
 #endif
