@@ -16,6 +16,7 @@
 #include "tx.h"
 #include "valgrind_internal.h"
 #include "memops.h"
+#include "asan.h"
 
 struct tx_data {
 	PMDK_SLIST_ENTRY(tx_data) tx_entry;
@@ -1206,27 +1207,9 @@ pmemobj_tx_merge_flags(struct tx_range_def *dest, struct tx_range_def *merged)
 	}
 }
 
-/*
- * pmemobj_tx_add_common -- (internal) common code for adding persistent memory
- * into the transaction
- */
 static int
-pmemobj_tx_add_common(struct tx *tx, struct tx_range_def *args)
+pmemobj_tx_add_common_no_check(struct tx *tx, struct tx_range_def *args)
 {
-	LOG(15, NULL);
-
-	if (args->size > PMEMOBJ_MAX_ALLOC_SIZE) {
-		ERR("snapshot size too large");
-		return obj_tx_fail_err(EINVAL, args->flags);
-	}
-
-	if (args->offset < tx->pop->heap_offset ||
-		(args->offset + args->size) >
-		(tx->pop->heap_offset + tx->pop->heap_size)) {
-		ERR("object outside of heap");
-		return obj_tx_fail_err(EINVAL, args->flags);
-	}
-
 	int ret = 0;
 
 	/*
@@ -1368,6 +1351,23 @@ pmemobj_tx_add_common(struct tx *tx, struct tx_range_def *args)
 	}
 
 	return 0;
+}
+
+/*
+ * pmemobj_tx_add_common -- (internal) common code for adding persistent memory
+ * into the transaction
+ */
+static int
+pmemobj_tx_add_common(struct tx *tx, struct tx_range_def *args)
+{
+	LOG(15, NULL);
+
+	if (args->size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("snapshot size too large");
+		return obj_tx_fail_err(EINVAL, args->flags);
+	}
+
+	return pmemobj_tx_add_common_no_check(tx, args);
 }
 
 /*
@@ -1795,6 +1795,29 @@ pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num)
 	return pmemobj_tx_xwcsdup(s, type_num, 0);
 }
 
+static int
+pmemobj_tx_asan_freed(struct tx* tx, uint64_t off, size_t size) {
+	size_t shadow_modification_size = (size+7)/8 + off%8;
+
+	struct tx_range_def args = {
+		.offset = tx->pop->shadow_mem_offset + off/8,
+		.size = shadow_modification_size,
+		.flags = 0,
+	};
+
+	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
+	//              use a custom ulog operation to save persistent memory
+	int ret = pmemobj_tx_add_common_no_check(tx, &args);
+	if (ret) {
+		return ret;
+	}
+
+	void *ptr = OBJ_OFF_TO_PTR(tx->pop, off);
+	pmemobj_asan_mark_mem(ptr, size, pmemobj_asan_FREED);
+
+	return 0;
+}
+
 /*
  * pmemobj_tx_xfree -- frees an existing object, with no_abort option
  */
@@ -1828,6 +1851,10 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 
 	ASSERT(OBJ_OID_IS_VALID(pop, oid));
 
+	uint8_t* shadow_object_start = pmemobj_asan_get_shadow_mem_location(OBJ_OFF_TO_PTR(pop, oid.off));
+	ASSERT((int8_t)*shadow_object_start >= 0 && "Invalid free");
+	//ASSERT(*(shadow_object_start-1) == pmemobj_asan_LEFT_REDZONE && "Invalid free"); // kartal TODO: Enable once we have implement the redzones
+
 	PMEMOBJ_API_START();
 
 	struct pobj_action *action;
@@ -1851,8 +1878,14 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 				ravl_remove(tx->ranges, n);
 				palloc_cancel(&pop->heap, action, 1);
 				VEC_ERASE_BY_PTR(&tx->actions, action);
+
+				int ret = pmemobj_tx_asan_freed(tx, oid.off, r->size);
+				if (ret) {
+					obj_tx_fail_err(ret, flags);
+				}
+
 				PMEMOBJ_API_END();
-				return 0;
+				return ret;
 			}
 		}
 	}
@@ -1864,10 +1897,16 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 		return ret;
 	}
 
+	size_t size = palloc_usable_size(&pop->heap, oid.off);
 	palloc_defer_free(&pop->heap, oid.off, action);
 
+	int ret = pmemobj_tx_asan_freed(tx, oid.off, size);
+	if (ret) {
+		obj_tx_fail_err(ret, flags);
+	}
+
 	PMEMOBJ_API_END();
-	return 0;
+	return ret;
 }
 
 /*

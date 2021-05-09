@@ -719,6 +719,7 @@ palloc_operation(struct palloc_heap *heap,
 	if (off != 0) {
 		dealloc = &ops[nops++];
 		palloc_defer_free_create(heap, off, dealloc);
+		// TODO: asan instrumentation
 		user_size = dealloc->m.m_ops->get_user_size(&dealloc->m);
 		if (user_size == size) {
 			operation_cancel(ctx);

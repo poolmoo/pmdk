@@ -679,6 +679,7 @@ list_remove_free(PMEMobjpool *pop, size_t pe_offset,
 
 	struct pobj_action deferred;
 	palloc_defer_free(&pop->heap, oidp->off, &deferred);
+	//TODO: asan instrumentation
 	uint64_t obj_doffset = oidp->off;
 
 	ASSERT((ssize_t)pe_offset >= 0);
