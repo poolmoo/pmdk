@@ -868,6 +868,8 @@ tx_realloc_common(struct tx *tx, PMEMoid oid, size_t size, uint64_t type_num,
 		}
 	}
 
+	// kartal TODO: asan instrumentation
+
 	return new_obj;
 }
 

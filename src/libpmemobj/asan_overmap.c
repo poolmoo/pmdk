@@ -9,7 +9,7 @@
 #include "asan_overmap.h"
 
 // *start* and *end* need to be 4kb*8 aligned
-void pmemobj_asan_overmap(volatile void* start, volatile void* end, int new_shadow_fd, off_t fd_offset)
+void pmemobj_asan_overmap(void* start, void* end, int new_shadow_fd, off_t fd_offset)
 {
     int prot = PROT_READ | PROT_WRITE;
     const uint64_t size = ((uint64_t)end - (uint64_t)start)/8;
@@ -21,7 +21,7 @@ void pmemobj_asan_overmap(volatile void* start, volatile void* end, int new_shad
     assert(res == (void*)shadow_start);
 }
 
-void pmemobj_asan_undo_overmap(volatile void* start, volatile void* end)
+void pmemobj_asan_undo_overmap(void* start, void* end)
 {
     int prot = PROT_READ | PROT_WRITE;
     const uint64_t size = ((uint64_t)end - (uint64_t)start)/8;

@@ -1916,6 +1916,8 @@ obj_replicas_cleanup(struct pool_set *set)
 
 		PMEMobjpool *pop = rep->part[0].addr;
 
+		pmemobj_asan_undo_overmap(pop, (uint8_t*)pop + set->poolsize);
+
 		if (pop->rpp != NULL) {
 			/*
 			 * remote replica will be closed in util_poolset_close
