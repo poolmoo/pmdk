@@ -2889,8 +2889,8 @@ obj_alloc_root(PMEMobjpool *pop, size_t size,
 	struct carg_realloc carg;
 
 	carg.ptr = OBJ_OFF_TO_PTR(pop, pop->root_offset);
-	carg.old_size = pop->root_size;
-	carg.new_size = size;
+	carg.old_size = pop->root_size + 2*pmemobj_asan_RED_ZONE_SIZE;
+	carg.new_size = size + 2*pmemobj_asan_RED_ZONE_SIZE;
 	carg.user_type = POBJ_ROOT_TYPE_NUM;
 	carg.constructor = constructor;
 	carg.zero_init = 1;
@@ -2901,7 +2901,7 @@ obj_alloc_root(PMEMobjpool *pop, size_t size,
 	operation_add_entry(ctx, &pop->root_size, size, ULOG_OPERATION_SET);
 
 	int ret = palloc_operation(&pop->heap, pop->root_offset,
-			&pop->root_offset, size,
+			&pop->root_offset, size + 2*pmemobj_asan_RED_ZONE_SIZE,
 			constructor_zrealloc_root, &carg,
 			POBJ_ROOT_TYPE_NUM, OBJ_INTERNAL_OBJECT_MASK,
 			0, 0, ctx);
@@ -2923,6 +2923,35 @@ pmemobj_root_size(PMEMobjpool *pop)
 		return pop->root_size;
 	} else
 		return 0;
+}
+
+int obj_asan_alloc_additional_work(struct tx* tx, PMEMoid *orig, size_t size_wo_redzone) {
+	if (OBJ_OID_IS_NULL(*orig)) {
+		return 0;
+	}
+
+	// Add the shadow memory to the transaction before modifying it
+	size_t shadow_modification_size = (size_wo_redzone+2*pmemobj_asan_RED_ZONE_SIZE+7)/8;
+
+	struct tx_range_def tx_add_args = {
+		.offset = tx->pop->shadow_mem_offset + orig->off/8,
+		.size = shadow_modification_size,
+		.flags = 0,
+	};
+
+	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
+	//              use a custom ulog operation to save persistent memory
+	int res = pmemobj_tx_add_common_no_check(tx, &tx_add_args);
+	if (res)
+		return res;
+
+	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_LEFT_REDZONE);
+	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off + pmemobj_asan_RED_ZONE_SIZE, size_wo_redzone, pmemobj_asan_ADDRESSABLE);	
+	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off + pmemobj_asan_RED_ZONE_SIZE + size_wo_redzone, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_RIGHT_REDZONE);
+
+	orig->off += pmemobj_asan_RED_ZONE_SIZE;
+
+	return 0;
 }
 
 /*
@@ -2976,11 +3005,9 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 	//				user-level transaction here.
 
 	TX_BEGIN(pop) {
-
-		pmemobj_asan_tag_mem_tx(root.off, size, pmemobj_asan_ADDRESSABLE);
-
+		obj_asan_alloc_additional_work(get_tx(), &root, size);
 	} TX_ONABORT {
-		ASSERT(false); // kartal TODO: do not assert
+		return OID_NULL;
 	}
 
 	TX_END

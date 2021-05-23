@@ -10,6 +10,8 @@
 #define pmemobj_asan_FREED 0xFD
 #define pmemobj_asan_INTERNAL 0xFE
 
+#define pmemobj_asan_RED_ZONE_SIZE 128
+
 uint8_t* pmemobj_asan_get_shadow_mem_location(void* _p);
 
 void pmemobj_asan_memset(uint8_t* start, uint8_t byt, size_t len);

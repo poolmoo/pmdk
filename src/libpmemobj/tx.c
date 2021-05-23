@@ -769,14 +769,23 @@ pmemobj_tx_add_common_no_check(struct tx *tx, struct tx_range_def *args)
 	return 0;
 }
 
+// kartal TODO: There seems not to be a good place for this prototype.
+// Putting it in obj.h doesn't work, because struct tx is defined in tx.h
+// And tx.h is obviously not the right place, either.
+// The fundamental reason is that we use transactions in obj.c, particularly during root allocation.
+int obj_asan_alloc_additional_work(struct tx* tx, PMEMoid *orig, size_t size_wo_redzone);
+
 /*
  * tx_alloc_common -- (internal) common function for alloc and zalloc
  */
 static PMEMoid
-tx_alloc_common(struct tx *tx, size_t provided_size, type_num_t type_num,
+tx_alloc_common(struct tx *tx, size_t provided_size_wo_redzone, type_num_t type_num,
 		palloc_constr constructor, struct tx_alloc_args args)
 {
 	LOG(3, NULL);
+
+	// kartal TODO: A custom allocator could save us one redzone per object.
+	size_t provided_size = provided_size_wo_redzone + 2*pmemobj_asan_RED_ZONE_SIZE;
 
 	if (provided_size > PMEMOBJ_MAX_ALLOC_SIZE) {
 		ERR("requested size too large");
@@ -804,8 +813,8 @@ tx_alloc_common(struct tx *tx, size_t provided_size, type_num_t type_num,
 	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
 		goto err_oom;
 
-	int res = pmemobj_asan_tag_mem_tx(retoid.off, provided_size, pmemobj_asan_ADDRESSABLE);
-	if (res) {
+	int res;
+	if ((res = obj_asan_alloc_additional_work(tx, &retoid, provided_size_wo_redzone))) {
 		tx_action_remove(tx);
 		return obj_tx_fail_null(res, args.flags);
 	}
@@ -867,8 +876,6 @@ tx_realloc_common(struct tx *tx, PMEMoid oid, size_t size, uint64_t type_num,
 			return OID_NULL;
 		}
 	}
-
-	// kartal TODO: asan instrumentation
 
 	return new_obj;
 }
@@ -1803,9 +1810,12 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 
 	uint8_t* shadow_object_start = pmemobj_asan_get_shadow_mem_location(OBJ_OFF_TO_PTR(pop, oid.off));
 	ASSERT((int8_t)*shadow_object_start >= 0 && "Invalid free");
-	//ASSERT(*(shadow_object_start-1) == pmemobj_asan_LEFT_REDZONE && "Invalid free"); // kartal TODO: Enable once we have implement the redzones
+	ASSERT(*(shadow_object_start-1) == pmemobj_asan_LEFT_REDZONE && "Invalid free");
 
 	PMEMOBJ_API_START();
+
+	// kartal TODO: Quarantine the region to provide additional temporal safety
+	oid.off -= pmemobj_asan_RED_ZONE_SIZE;
 
 	struct pobj_action *action;
 
