@@ -1,7 +1,7 @@
 #include "asan.h"
-#include "tx.h"
 
 #include <assert.h>
+#include "obj.h"
 
 /*
 
@@ -31,6 +31,18 @@ void pmemobj_asan_memset(uint8_t* start, uint8_t byt, size_t len) {
 	}
 }
 
+__attribute__((no_sanitize("address")))
+void pmemobj_asan_memcpy(void* dest_, const void* src_, size_t len) {
+	uint8_t* dest = (uint8_t*)dest_;
+	const uint8_t* src = (const uint8_t*)src_;
+	while (len) {
+		*(uint8_t*)dest = *(uint8_t*)src;
+		dest++;
+		src++;
+		len--;
+	}
+}
+
 // len in bytes
 __attribute__((no_sanitize("address")))
 void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
@@ -38,7 +50,7 @@ void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
 	if ((uint64_t)start%8) {
 		uint64_t misalignment = (uint64_t)start%8;
 		/*uint8_t* shadow_pos = get_shadow_mem_location(start);
-		*shadow_pos = tag;*/ // We can only enter this branch during the marking of the right red-zone for non-multiple-of-8 sized objects. In this case, we must no modify this bit of the shadow memory.
+		*shadow_pos = tag;*/ // We can only enter this branch during the marking of the right red-zone for non-multiple-of-8 sized objects. In this case, we must not modify this bit of the shadow memory.
 		start = (void*)((uint64_t)start+8-misalignment);
 		len -= 8-misalignment;
 	}
@@ -53,27 +65,17 @@ void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
 	}
 }
 
-int
-pmemobj_asan_tag_mem_tx(uint64_t off, size_t size, uint8_t tag) {
-	struct tx* tx = get_tx();
-
-	size_t shadow_modification_size = (size+7)/8 + off%8;
-
-	struct tx_range_def args = {
-		.offset = tx->pop->shadow_mem_offset + off/8,
-		.size = shadow_modification_size,
-		.flags = 0,
-	};
-
-	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
-	//              use a custom ulog operation to save persistent memory
-	int ret = pmemobj_tx_add_common_no_check(tx, &args);
-	if (ret) {
-		return ret;
+void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t lrz_off, size_t size_wo_redzone) {
+	if (lrz_off == 0) {
+		return ;
 	}
 
-	void *ptr = (void *)((uintptr_t)tx->pop + off);
-	pmemobj_asan_mark_mem(ptr, size, tag);
+	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_LEFT_REDZONE);
+	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off + pmemobj_asan_RED_ZONE_SIZE, size_wo_redzone, pmemobj_asan_ADDRESSABLE);	
+	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off + pmemobj_asan_RED_ZONE_SIZE + size_wo_redzone, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_RIGHT_REDZONE);
 
-	return 0;
+	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + lrz_off/8;
+	size_t sm_len = (size_wo_redzone + 7 + 2*pmemobj_asan_RED_ZONE_SIZE)/8; // Round up, in case size_wo_redzone % 8 != 0
+
+	pmemobj_persist(pop, sm_start, sm_len);
 }

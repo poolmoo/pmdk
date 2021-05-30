@@ -1,8 +1,9 @@
-#ifndef PMEMOBJ_ASAN_COMMON_H
-#define PMEMOBJ_ASAN_COMMON_H
+#ifndef PMEMOBJ_ASAN_H
+#define PMEMOBJ_ASAN_H
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <libpmemobj/base.h>
 
 #define pmemobj_asan_ADDRESSABLE 0
 #define pmemobj_asan_LEFT_REDZONE 0xFA
@@ -15,9 +16,10 @@
 uint8_t* pmemobj_asan_get_shadow_mem_location(void* _p);
 
 void pmemobj_asan_memset(uint8_t* start, uint8_t byt, size_t len);
+void pmemobj_asan_memcpy(void* dest, const void* src, size_t len);
 
 void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag);
 
-int pmemobj_asan_tag_mem_tx(uint64_t off, size_t size, uint8_t tag);
+void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t lrz_off, size_t size_wo_redzone);
 
 #endif

@@ -2925,35 +2925,6 @@ pmemobj_root_size(PMEMobjpool *pop)
 		return 0;
 }
 
-int obj_asan_alloc_additional_work(struct tx* tx, PMEMoid *orig, size_t size_wo_redzone) {
-	if (OBJ_OID_IS_NULL(*orig)) {
-		return 0;
-	}
-
-	// Add the shadow memory to the transaction before modifying it
-	size_t shadow_modification_size = (size_wo_redzone+2*pmemobj_asan_RED_ZONE_SIZE+7)/8;
-
-	struct tx_range_def tx_add_args = {
-		.offset = tx->pop->shadow_mem_offset + orig->off/8,
-		.size = shadow_modification_size,
-		.flags = 0,
-	};
-
-	// kartal TODO: instead of adding part of the shadow mem to the transaction as a snapshot,
-	//              use a custom ulog operation to save persistent memory
-	int res = pmemobj_tx_add_common_no_check(tx, &tx_add_args);
-	if (res)
-		return res;
-
-	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_LEFT_REDZONE);
-	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off + pmemobj_asan_RED_ZONE_SIZE, size_wo_redzone, pmemobj_asan_ADDRESSABLE);	
-	pmemobj_asan_mark_mem((uint8_t*)tx->pop + orig->off + pmemobj_asan_RED_ZONE_SIZE + size_wo_redzone, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_RIGHT_REDZONE);
-
-	orig->off += pmemobj_asan_RED_ZONE_SIZE;
-
-	return 0;
-}
-
 /*
  * pmemobj_root_construct -- returns root object
  */
@@ -2996,21 +2967,6 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
 
 	PMEMOBJ_API_END();
-
-	// Mark the root object accessible in shadow memory
-	// kartal TODO: This is non-atomic. If the operation gets torn at this point,
-	//              we will have a root object that may be marked inaccessible/freed.
-	//				obj_alloc_root starts a transcation, but I am not familiar enough
-	//				with the library internals to utilize it, so I am starting a new,
-	//				user-level transaction here.
-
-	TX_BEGIN(pop) {
-		obj_asan_alloc_additional_work(get_tx(), &root, size);
-	} TX_ONABORT {
-		return OID_NULL;
-	}
-
-	TX_END
 
 	return root;
 }
