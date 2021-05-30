@@ -183,11 +183,11 @@ static void
 memblock_header_compact_write(const struct memory_block *m,
 	size_t size, uint64_t extra, uint16_t flags)
 {
-	COMPILE_ERROR_ON(ALLOC_HDR_COMPACT_SIZE > CACHELINE_SIZE);
+	// COMPILE_ERROR_ON(ALLOC_HDR_COMPACT_SIZE > CACHELINE_SIZE);
 
 	struct {
 		struct allocation_header_compact hdr;
-		uint8_t padding[CACHELINE_SIZE - ALLOC_HDR_COMPACT_SIZE];
+		// uint8_t padding[CACHELINE_SIZE - ALLOC_HDR_COMPACT_SIZE];
 	} padded;
 
 	padded.hdr.size = size | ((uint64_t)flags << ALLOC_HDR_SIZE_SHIFT);
@@ -197,14 +197,14 @@ memblock_header_compact_write(const struct memory_block *m,
 
 	VALGRIND_DO_MAKE_MEM_UNDEFINED(hdrp, sizeof(*hdrp));
 
-	/*
-	 * If possible write the entire header with a single memcpy, this allows
-	 * the copy implementation to avoid a cache miss on a partial cache line
-	 * write.
-	 */
 	size_t hdr_size = ALLOC_HDR_COMPACT_SIZE;
-	if ((uintptr_t)hdrp % CACHELINE_SIZE == 0 && size >= sizeof(padded))
-		hdr_size = sizeof(padded);
+	// /*
+	//  * If possible write the entire header with a single memcpy, this allows
+	//  * the copy implementation to avoid a cache miss on a partial cache line
+	//  * write.
+	//  */
+	// if ((uintptr_t)hdrp % CACHELINE_SIZE == 0 && size >= sizeof(padded))
+	// 	hdr_size = sizeof(padded);
 
 	VALGRIND_ADD_TO_TX(hdrp, hdr_size);
 

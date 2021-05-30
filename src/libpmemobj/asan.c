@@ -65,17 +65,16 @@ void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
 	}
 }
 
-void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t lrz_off, size_t size_wo_redzone) {
-	if (lrz_off == 0) {
+void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t hdr_off, uint64_t data_off, size_t size) {
+	if (hdr_off == 0) {
 		return ;
 	}
 
-	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_LEFT_REDZONE);
-	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off + pmemobj_asan_RED_ZONE_SIZE, size_wo_redzone, pmemobj_asan_ADDRESSABLE);	
-	pmemobj_asan_mark_mem((uint8_t*)pop + lrz_off + pmemobj_asan_RED_ZONE_SIZE + size_wo_redzone, pmemobj_asan_RED_ZONE_SIZE, pmemobj_asan_RIGHT_REDZONE);
+	pmemobj_asan_mark_mem((uint8_t*)pop + hdr_off, data_off - hdr_off, pmemobj_asan_LEFT_REDZONE);
+	pmemobj_asan_mark_mem((uint8_t*)pop + data_off, size, pmemobj_asan_ADDRESSABLE);	
 
-	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + lrz_off/8;
-	size_t sm_len = (size_wo_redzone + 7 + 2*pmemobj_asan_RED_ZONE_SIZE)/8; // Round up, in case size_wo_redzone % 8 != 0
+	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + hdr_off/8;
+	size_t sm_len = (size + 7 + data_off - hdr_off)/8; // Round up, in case size_wo_redzone % 8 != 0
 
 	pmemobj_persist(pop, sm_start, sm_len);
 }

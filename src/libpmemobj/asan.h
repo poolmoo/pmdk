@@ -20,6 +20,6 @@ void pmemobj_asan_memcpy(void* dest, const void* src, size_t len);
 
 void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag);
 
-void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t lrz_off, size_t size_wo_redzone);
+void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t hdr_off, uint64_t data_off, size_t size);
 
 #endif

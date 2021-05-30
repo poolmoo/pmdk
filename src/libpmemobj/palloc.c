@@ -172,27 +172,25 @@ alloc_prep_block(struct palloc_heap *heap, const struct memory_block *m,
  * (best-fit, next-fit, ...) varies depending on the bucket container.
  */
 static int
-palloc_reservation_create(struct palloc_heap *heap, size_t size_wo_redzone,
+palloc_reservation_create(struct palloc_heap *heap, size_t size,
 	palloc_constr constructor, void *arg,
 	uint64_t extra_field, uint16_t object_flags,
 	uint16_t class_id, uint16_t arena_id,
 	struct pobj_action_internal *out)
 {
 	int err = 0;
-	// kartal TODO: A custom allocator could save us one redzone per object.
-	size_t size_with_redzone = size_wo_redzone + 2*pmemobj_asan_RED_ZONE_SIZE;
 
 	struct memory_block *new_block = &out->m;
 	out->type = POBJ_ACTION_TYPE_HEAP;
 
 	ASSERT(class_id < UINT8_MAX);
 	struct alloc_class *c = class_id == 0 ?
-		heap_get_best_class(heap, size_with_redzone) :
+		heap_get_best_class(heap, size) :
 		alloc_class_by_id(heap_alloc_classes(heap),
 			(uint8_t)class_id);
 
 	if (c == NULL) {
-		ERR("no allocation class for size %lu bytes", size_with_redzone);
+		ERR("no allocation class for size %lu bytes", size);
 		errno = EINVAL;
 		return -1;
 	}
@@ -205,10 +203,10 @@ palloc_reservation_create(struct palloc_heap *heap, size_t size_wo_redzone,
 	 * For example, to allocate 500 bytes from a bucket that
 	 * provides 256 byte blocks two memory 'units' are required.
 	 */
-	ssize_t size_idx = alloc_class_calc_size_idx(c, size_with_redzone);
+	ssize_t size_idx = alloc_class_calc_size_idx(c, size);
 	if (size_idx < 0) {
 		ERR("allocation class not suitable for size %lu bytes",
-			size_with_redzone);
+			size);
 		errno = EINVAL;
 		return -1;
 	}
@@ -222,7 +220,10 @@ palloc_reservation_create(struct palloc_heap *heap, size_t size_wo_redzone,
 	if (err != 0)
 		goto out;
 
-	pmemobj_asan_alloc_sm_modify_persist((PMEMobjpool*)heap->base, (uint64_t)((uint8_t*)new_block->m_ops->get_user_data(new_block) - (uint8_t*)heap->base), size_wo_redzone);
+	uint64_t hdr_off = (uint64_t)((uint8_t*)new_block->m_ops->get_real_data(new_block) - (uint8_t*)heap->base);
+	uint64_t data_off = (uint64_t)((uint8_t*)new_block->m_ops->get_user_data(new_block) - (uint8_t*)heap->base);
+	pmemobj_asan_alloc_sm_modify_persist((PMEMobjpool*)heap->base, hdr_off, data_off, size);
+
 
 	if (alloc_prep_block(heap, new_block, constructor, arg,
 		extra_field, object_flags, out) != 0) {
@@ -248,7 +249,6 @@ palloc_reservation_create(struct palloc_heap *heap, size_t size_wo_redzone,
 
 	out->lock = new_block->m_ops->get_lock(new_block);
 	out->new_state = MEMBLOCK_ALLOCATED;
-	out->offset += pmemobj_asan_RED_ZONE_SIZE;
 
 out:
 	heap_bucket_release(heap, b);
@@ -726,7 +726,7 @@ palloc_operation(struct palloc_heap *heap,
 		dealloc = &ops[nops++];
 		palloc_defer_free_create(heap, off, dealloc);
 		user_size = dealloc->m.m_ops->get_user_size(&dealloc->m);
-		if (user_size == size + 2*pmemobj_asan_RED_ZONE_SIZE) {
+		if (user_size == size) {
 			operation_cancel(ctx);
 			return 0;
 		}

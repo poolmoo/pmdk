@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "asan.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,18 +141,28 @@ struct heap_layout {
 #define ALLOC_HDR_FLAGS_MASK (((1ULL) << ALLOC_HDR_SIZE_SHIFT) - 1)
 
 struct allocation_header_legacy {
-	uint8_t unused[8];
-	uint64_t size;
-	uint8_t unused2[32];
-	uint64_t root_size;
-	uint64_t type_num;
+	union {
+		struct {
+			uint8_t unused[8];
+			uint64_t size;
+			uint8_t unused2[32];
+			uint64_t root_size;
+			uint64_t type_num;
+		};
+		uint8_t asan_red_zone[pmemobj_asan_RED_ZONE_SIZE];
+	};
 };
 
 #define ALLOC_HDR_COMPACT_SIZE sizeof(struct allocation_header_compact)
 
 struct allocation_header_compact {
-	uint64_t size;
-	uint64_t extra;
+	union {
+		struct {
+			uint64_t size;
+			uint64_t extra;
+		};
+		uint8_t asan_red_zone[pmemobj_asan_RED_ZONE_SIZE];
+	};
 };
 
 enum header_type {
@@ -165,7 +176,7 @@ enum header_type {
 static const size_t header_type_to_size[MAX_HEADER_TYPES] = {
 	sizeof(struct allocation_header_legacy),
 	sizeof(struct allocation_header_compact),
-	0
+	pmemobj_asan_RED_ZONE_SIZE
 };
 
 static const enum chunk_flags header_type_to_flag[MAX_HEADER_TYPES] = {

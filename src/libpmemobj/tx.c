@@ -1800,7 +1800,6 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
 	PMEMOBJ_API_START();
 
 	// kartal TODO: Quarantine the region to provide additional temporal safety
-	oid.off -= pmemobj_asan_RED_ZONE_SIZE;
 
 	struct pobj_action *action;
 
