@@ -18,6 +18,7 @@
 
 #include <string.h>
 
+#include "asan.h"
 #include "obj.h"
 #include "heap.h"
 #include "memblock.h"
@@ -1059,6 +1060,7 @@ huge_vg_init(const struct memory_block *m, int objects,
 	struct chunk_header *hdr = heap_get_chunk_hdr(m->heap, m);
 	struct chunk *chunk = heap_get_chunk(m->heap, m);
 	VALGRIND_DO_MAKE_MEM_DEFINED(hdr, sizeof(*hdr));
+	pmemobj_asan_mark_mem_persist(m->heap->base, hdr, sizeof(*hdr), pmemobj_asan_METADATA);
 
 	/*
 	 * Mark unused chunk headers as not accessible.
@@ -1067,9 +1069,15 @@ huge_vg_init(const struct memory_block *m, int objects,
 		&z->chunk_headers[m->chunk_id + 1],
 		(m->size_idx - 1) *
 		sizeof(struct chunk_header));
+	pmemobj_asan_mark_mem_persist(m->heap->base,
+		&z->chunk_headers[m->chunk_id + 1],
+		(m->size_idx - 1) *
+		sizeof(struct chunk_header),
+		pmemobj_asan_FREED);
 
 	size_t size = block_get_real_size(m);
 	VALGRIND_DO_MAKE_MEM_NOACCESS(chunk, size);
+	pmemobj_asan_mark_mem_persist(m->heap->base, chunk, size, pmemobj_asan_FREED);
 
 	if (objects && huge_get_state(m) == MEMBLOCK_ALLOCATED) {
 		if (cb(m, arg) != 0)
@@ -1088,9 +1096,12 @@ run_vg_init(const struct memory_block *m, int objects,
 	struct chunk_header *hdr = heap_get_chunk_hdr(m->heap, m);
 	struct chunk_run *run = heap_get_chunk_run(m->heap, m);
 	VALGRIND_DO_MAKE_MEM_DEFINED(hdr, sizeof(*hdr));
+	pmemobj_asan_mark_mem_persist(m->heap->base, hdr, sizeof(*hdr), pmemobj_asan_METADATA);
 
 	/* set the run metadata as defined */
 	VALGRIND_DO_MAKE_MEM_DEFINED(run, RUN_BASE_METADATA_SIZE);
+	pmemobj_asan_mark_mem_persist(m->heap->base, run, RUN_BASE_METADATA_SIZE, pmemobj_asan_METADATA);
+
 
 	struct run_bitmap b;
 	run_get_bitmap(m, &b);
@@ -1103,13 +1114,18 @@ run_vg_init(const struct memory_block *m, int objects,
 			&z->chunk_headers[m->chunk_id + j];
 		VALGRIND_DO_MAKE_MEM_DEFINED(data_hdr,
 			sizeof(struct chunk_header));
+		pmemobj_asan_mark_mem_persist(m->heap->base, data_hdr,
+			sizeof(struct chunk_header),
+			pmemobj_asan_METADATA);
 		ASSERTeq(data_hdr->type, CHUNK_TYPE_RUN_DATA);
 	}
 
 	VALGRIND_DO_MAKE_MEM_NOACCESS(run, SIZEOF_RUN(run, m->size_idx));
+	pmemobj_asan_mark_mem_persist(m->heap->base, run, SIZEOF_RUN(run, m->size_idx),	pmemobj_asan_FREED);
 
 	/* set the run bitmap as defined */
 	VALGRIND_DO_MAKE_MEM_DEFINED(run, b.size + RUN_BASE_METADATA_SIZE);
+	pmemobj_asan_mark_mem_persist(m->heap->base, run, b.size + RUN_BASE_METADATA_SIZE, pmemobj_asan_METADATA);
 
 	if (objects) {
 		if (run_iterate_used(m, cb, arg) != 0)
@@ -1309,12 +1325,13 @@ memblock_huge_init(struct palloc_heap *heap,
 
 	VALGRIND_DO_MAKE_MEM_UNDEFINED(hdr, sizeof(*hdr));
 	VALGRIND_ANNOTATE_NEW_MEMORY(hdr, sizeof(*hdr));
+	pmemobj_asan_mark_mem_persist(heap->base, hdr, sizeof(*hdr), pmemobj_asan_METADATA);
 
 	*hdr = nhdr; /* write the entire header (8 bytes) at once */
 
 	pmemops_persist(&heap->p_ops, hdr, sizeof(*hdr));
 
-	huge_write_footer(hdr, size_idx);
+	huge_write_footer(hdr, size_idx); // kartal TODO: Add a footer as a redzone to all the chunks
 
 	memblock_rebuild_state(heap, &m);
 
@@ -1343,6 +1360,9 @@ memblock_run_init(struct palloc_heap *heap,
 	size_t runsize = SIZEOF_RUN(run, size_idx);
 
 	VALGRIND_DO_MAKE_MEM_UNDEFINED(run, runsize);
+	pmemobj_asan_mark_mem_persist(heap->base, run, sizeof(run->hdr), pmemobj_asan_METADATA);
+	pmemobj_asan_mark_mem_persist(heap->base, run->content, sizeof(run->content), pmemobj_asan_ADDRESSABLE); // kartal TODO: Is this correct?
+
 
 	/* add/remove chunk_run and chunk_header to valgrind transaction */
 	VALGRIND_ADD_TO_TX(run, runsize);
@@ -1382,6 +1402,7 @@ memblock_run_init(struct palloc_heap *heap,
 		data_hdr = &z->chunk_headers[chunk_id + i];
 		VALGRIND_DO_MAKE_MEM_UNDEFINED(data_hdr, sizeof(*data_hdr));
 		VALGRIND_ANNOTATE_NEW_MEMORY(data_hdr, sizeof(*data_hdr));
+		pmemobj_asan_mark_mem_persist(heap->base, data_hdr, sizeof(*data_hdr), pmemobj_asan_METADATA);
 		run_data_hdr.size_idx = i;
 		*data_hdr = run_data_hdr;
 	}

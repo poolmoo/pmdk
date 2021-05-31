@@ -117,6 +117,8 @@ alloc_prep_block(struct palloc_heap *heap, const struct memory_block *m,
 	VALGRIND_DO_MEMPOOL_ALLOC(heap->layout, uptr, usize);
 	VALGRIND_DO_MAKE_MEM_UNDEFINED(uptr, usize);
 	VALGRIND_ANNOTATE_NEW_MEMORY(uptr, usize);
+	// No need for ASan instrumentation here, because palloc_reservation_create already takes care of marking the addressable part.
+	// Note that usize might be larger than what the user has requested.
 
 	m->m_ops->write_header(m, extra_field, object_flags);
 
@@ -220,9 +222,8 @@ palloc_reservation_create(struct palloc_heap *heap, size_t size,
 	if (err != 0)
 		goto out;
 
-	uint64_t hdr_off = (uint64_t)((uint8_t*)new_block->m_ops->get_real_data(new_block) - (uint8_t*)heap->base);
 	uint64_t data_off = (uint64_t)((uint8_t*)new_block->m_ops->get_user_data(new_block) - (uint8_t*)heap->base);
-	pmemobj_asan_alloc_sm_modify_persist((PMEMobjpool*)heap->base, hdr_off, data_off, size);
+	pmemobj_asan_alloc_sm_modify_persist((PMEMobjpool*)heap->base, data_off, size);
 
 
 	if (alloc_prep_block(heap, new_block, constructor, arg,

@@ -65,16 +65,21 @@ void pmemobj_asan_mark_mem(void* start, size_t len, uint8_t tag) {
 	}
 }
 
-void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t hdr_off, uint64_t data_off, size_t size) {
-	if (hdr_off == 0) {
-		return ;
-	}
+void pmemobj_asan_mark_mem_persist(PMEMobjpool* pop, void* start, size_t len, uint8_t tag) {
+	pmemobj_asan_mark_mem(start, len, tag);
 
-	pmemobj_asan_mark_mem((uint8_t*)pop + hdr_off, data_off - hdr_off, pmemobj_asan_LEFT_REDZONE);
-	pmemobj_asan_mark_mem((uint8_t*)pop + data_off, size, pmemobj_asan_ADDRESSABLE);	
+	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + ((uint8_t*)start-(uint8_t*)pop)/8;
+	size_t sm_len = (len + 7)/8; // Round up
 
-	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + hdr_off/8;
-	size_t sm_len = (size + 7 + data_off - hdr_off)/8; // Round up, in case size_wo_redzone % 8 != 0
+	pmemobj_persist(pop, sm_start, sm_len);
+}
+
+void pmemobj_asan_alloc_sm_modify_persist(PMEMobjpool* pop, uint64_t data_off, size_t size) {
+	// The left redzone is the allocation header. It has already been marked as METADATA.
+	pmemobj_asan_mark_mem((uint8_t*)pop + data_off, size, pmemobj_asan_ADDRESSABLE);
+
+	void* sm_start = (uint8_t*)pop + pop->shadow_mem_offset + data_off/8;
+	size_t sm_len = (size + 7)/8; // Round up, in case size_wo_redzone % 8 != 0
 
 	pmemobj_persist(pop, sm_start, sm_len);
 }

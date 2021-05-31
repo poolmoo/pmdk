@@ -900,28 +900,19 @@ obj_descr_create(PMEMobjpool *pop, const char *layout, size_t poolsize)
 	pmemops_persist(p_ops, &pop->shadow_mem_offset, sizeof(pop->shadow_mem_offset));
 
 	/*
-	 * Zero-out the persistent shadow memory
+	 * Mark the whole pool FREED.
 	 * It's safe to use PMEMOBJ_F_RELAXED flag because the shadow memory
 	 * must be entirely zeroed and it is already 8-byte padded.
 	 */
-	pmemops_memset(p_ops, (char*)pop + pop->shadow_mem_offset, 0,
+	pmemops_memset(p_ops, (char*)pop + pop->shadow_mem_offset, pmemobj_asan_FREED,
 		pop->set->poolsize/8, PMEMOBJ_F_RELAXED);
 
-	//uint8_t* vmem_shadow_mem_start = (uint8_t*)D_RW(rootp->shadow_mem);
-	// Mark the red zone within the persistent shadow mem
-	// The red zone corresponding to the volatile persistent memory range is marked non-accessible on a page permission level, because filling the red zone with -1 would allocate physical memory.
-	// But we simply set it to -1
-	// TODO: For portions of the persistent shadow memory that correspond to itself, avoid marking them -1 and instead mark them no read/write using page permissions.
-	//       Just like the regular ASan
-	//pmemobj_memset_persist(pool, vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, detail::TAG::INTERNAL, shadow_size/8); // Note that because of the overmapping, the change will be mirrored to the overmapped shadow memory.
-	// This is disabled for now, because:
-	// During transactional memory operations we need to add parts of the shadow memory to the undo log.
-	// Adding the shadow memory to the transaction undo log causes libpmemobj
-	//  to copy it, using memcpy. This call gets intercepted and instrumented by ASan.
-	//  Because the persistent shadow memory (in the original file mapping) is marked inaccessible,
-	//    ASan memcpy raises an error.
-	//detail::mymemset(vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, detail::TAG::INTERNAL, shadow_size/8);
-	//pmemobj_persist(pool, vmem_shadow_mem_start + rootp->shadow_mem.oid.off/8, shadow_size/8);
+	// Mark the header, descriptor and the lanes METADATA
+	pmemops_memset(p_ops, (char*)pop + pop->shadow_mem_offset, pmemobj_asan_METADATA,
+		pop->shadow_mem_offset/8, 0);
+
+	// Mark the shadow memory itself as INTERNAL
+	pmemops_memset(p_ops, (uint8_t*)pop + pop->shadow_mem_offset + pop->shadow_mem_offset/8, pmemobj_asan_INTERNAL, pop->set->poolsize/8/8, PMEMOBJ_F_RELAXED);
 
 	pop->heap_offset = pop->shadow_mem_offset + pop->set->poolsize/8;
 	pop->heap_offset = (pop->heap_offset + Pagesize - 1) & ~(Pagesize - 1);
@@ -2889,8 +2880,8 @@ obj_alloc_root(PMEMobjpool *pop, size_t size,
 	struct carg_realloc carg;
 
 	carg.ptr = OBJ_OFF_TO_PTR(pop, pop->root_offset);
-	carg.old_size = pop->root_size + 2*pmemobj_asan_RED_ZONE_SIZE;
-	carg.new_size = size + 2*pmemobj_asan_RED_ZONE_SIZE;
+	carg.old_size = pop->root_size;
+	carg.new_size = size;
 	carg.user_type = POBJ_ROOT_TYPE_NUM;
 	carg.constructor = constructor;
 	carg.zero_init = 1;
@@ -2901,7 +2892,7 @@ obj_alloc_root(PMEMobjpool *pop, size_t size,
 	operation_add_entry(ctx, &pop->root_size, size, ULOG_OPERATION_SET);
 
 	int ret = palloc_operation(&pop->heap, pop->root_offset,
-			&pop->root_offset, size + 2*pmemobj_asan_RED_ZONE_SIZE,
+			&pop->root_offset, size,
 			constructor_zrealloc_root, &carg,
 			POBJ_ROOT_TYPE_NUM, OBJ_INTERNAL_OBJECT_MASK,
 			0, 0, ctx);

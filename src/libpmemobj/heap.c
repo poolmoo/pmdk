@@ -10,6 +10,7 @@
 #include <string.h>
 #include <float.h>
 
+#include "asan.h"
 #include "queue.h"
 #include "heap.h"
 #include "out.h"
@@ -1563,6 +1564,7 @@ heap_init(void *heap_start, uint64_t heap_size, uint64_t *sizep,
 		return EINVAL;
 
 	VALGRIND_DO_MAKE_MEM_UNDEFINED(heap_start, heap_size);
+	pmemobj_asan_mark_mem_persist(p_ops->base, heap_start, heap_size, pmemobj_asan_FREED);
 
 	struct heap_layout *layout = heap_start;
 	heap_write_header(&layout->header);
