@@ -65,15 +65,19 @@ error_active_alloc:
 int
 bucket_insert_block(struct bucket *b, const struct memory_block *m)
 {
-	size_t size = m->m_ops->get_real_size(m);
-	void *data = m->m_ops->get_real_data(m);
+	size_t real_size = m->m_ops->get_real_size(m);
+	void *real_data = m->m_ops->get_real_data(m);
+	size_t user_size = m->m_ops->get_user_size(m);
+	void* user_data = m->m_ops->get_user_data(m);
 #if VG_MEMCHECK_ENABLED || VG_HELGRIND_ENABLED || VG_DRD_ENABLED
 	if (On_memcheck || On_drd_or_hg) {
-		VALGRIND_DO_MAKE_MEM_NOACCESS(data, size);
-		VALGRIND_ANNOTATE_NEW_MEMORY(data, size);
+		VALGRIND_DO_MAKE_MEM_NOACCESS(real_data, real_size);
+		VALGRIND_ANNOTATE_NEW_MEMORY(real_data, real_size);
 	}
 #endif
-	pmemobj_asan_mark_mem_persist(m->heap->base, data, size, pmemobj_asan_FREED);
+	size_t hdr_size = real_size - user_size;
+	pmemobj_asan_mark_mem_persist(m->heap->base, real_data, hdr_size, pmemobj_asan_LEFT_REDZONE);
+	pmemobj_asan_mark_mem_persist(m->heap->base, user_data, user_size, pmemobj_asan_FREED);
 	return b->c_ops->insert(b->container, m);
 }
 

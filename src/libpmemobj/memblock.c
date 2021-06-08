@@ -1414,6 +1414,7 @@ memblock_run_init(struct palloc_heap *heap,
 	ASSERT(hdr->type == CHUNK_TYPE_FREE);
 
 	VALGRIND_ANNOTATE_NEW_MEMORY(hdr, sizeof(*hdr));
+	pmemobj_asan_mark_mem_persist(heap->base, hdr, sizeof(*hdr), pmemobj_asan_METADATA);
 
 	struct chunk_header run_hdr;
 	run_hdr.size_idx = hdr->size_idx;
