@@ -635,8 +635,8 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
-	struct user_data *data;
-	size_t size;
+	struct user_data *data=NULL;
+	size_t size=0;
 	enum pool_state state = pool_access_data(pool, (void **)&data, &size);
 
 	int ret = 1;
