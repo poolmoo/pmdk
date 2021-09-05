@@ -41,7 +41,9 @@ include ../Makefile.inc
 
 CFLAGS += -DUSE_LIBDL -D_PMEMOBJ_INTRNL $(LIBNDCTL_CFLAGS)
 
-LIBS += -pthread -lpmem $(LIBDL) $(LIBNDCTL_LIBS)
+# Link libpmemobj with ASan, as asan_verifier.c is compiled with ASan
+# Note that this does not affect whether any file is compiled with ASan
+LIBS += -pthread -lpmem $(LIBDL) $(LIBNDCTL_LIBS) -fsanitize=address
 
 ifeq ($(PMASAN_TRACK_SPACE_USAGE), 1)
 CFLAGS += -DPMASAN_TRACK_SPACE_USAGE=$(PMASAN_TRACK_SPACE_USAGE)
