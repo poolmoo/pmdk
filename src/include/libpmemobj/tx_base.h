@@ -11,6 +11,7 @@
 #include <setjmp.h>
 
 #include <libpmemobj/base.h>
+#include <libpmemobj/safe_base.h>
 
 #ifdef __cplusplus
 extern "C" {
