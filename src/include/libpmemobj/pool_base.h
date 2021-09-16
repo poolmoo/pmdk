@@ -79,10 +79,21 @@ void pmemobj_close(PMEMobjpool *pop);
 PMEMoid pmemobj_root(PMEMobjpool *pop, size_t size);
 
 /*
+ * pmemobj_root that returns a safe object.
+ */
+SafePMEMoid safe_pmemobj_root(PMEMobjpool *pop, size_t size);
+
+/*
  * Same as above, but calls the constructor function when the object is first
  * created and on all subsequent reallocations.
  */
 PMEMoid pmemobj_root_construct(PMEMobjpool *pop, size_t size,
+	pmemobj_constr constructor, void *arg);
+
+/*
+ * pmemobj_root_construct that returns a safe object.
+ */
+SafePMEMoid safe_pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 	pmemobj_constr constructor, void *arg);
 
 /*

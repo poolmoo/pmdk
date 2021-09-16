@@ -29,9 +29,19 @@ extern "C" {
 PMEMoid pmemobj_first(PMEMobjpool *pop);
 
 /*
+ * Returns the first safe object of the specified type number.
+ */
+SafePMEMoid safe_pmemobj_first(PMEMobjpool *pop);
+
+/*
  * Returns the next object of the same type.
  */
 PMEMoid pmemobj_next(PMEMoid oid);
+
+/*
+ * Returns the next safe object of the same type.
+ */
+SafePMEMoid safe_pmemobj_next(SafePMEMoid oid);
 
 #ifdef __cplusplus
 }

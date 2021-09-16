@@ -60,6 +60,12 @@ void pmemobj_set_value(PMEMobjpool *pop, struct pobj_action *act,
 	uint64_t *ptr, uint64_t value);
 void pmemobj_defer_free(PMEMobjpool *pop, PMEMoid oid, struct pobj_action *act);
 
+SafePMEMoid safe_pmemobj_reserve(PMEMobjpool *pop, struct pobj_action *act, size_t size,
+			uint64_t type_num);
+SafePMEMoid safe_pmemobj_xreserve(PMEMobjpool *pop, struct pobj_action *act, size_t size,
+			 uint64_t type_num, uint64_t flags);
+void safe_pmemobj_defer_free(PMEMobjpool *pop, SafePMEMoid oid, struct pobj_action *act);
+
 int pmemobj_publish(PMEMobjpool *pop, struct pobj_action *actv,
 	size_t actvcnt);
 int pmemobj_tx_publish(struct pobj_action *actv, size_t actvcnt);
