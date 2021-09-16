@@ -33,6 +33,20 @@ int pmemobj_list_move(PMEMobjpool *pop, size_t pe_old_offset,
 	void *head_old, size_t pe_new_offset, void *head_new,
 	PMEMoid dest, int before, PMEMoid oid);
 
+int safe_pmemobj_list_insert(PMEMobjpool *pop, size_t pe_offset, void *head,
+	SafePMEMoid dest, int before, SafePMEMoid oid);
+
+SafePMEMoid safe_pmemobj_list_insert_new(PMEMobjpool *pop, size_t pe_offset,
+	void *head, SafePMEMoid dest, int before, size_t size, 
+	uint64_t type_num, pmemobj_constr constructor, void *arg);
+
+int safe_pmemobj_list_remove(PMEMobjpool *pop, size_t pe_offset, void *head,
+	SafePMEMoid oid, int free);
+
+int safe_pmemobj_list_move(PMEMobjpool *pop, size_t pe_old_offset,
+	void *head_old, size_t pe_new_offset, void *head_new, SafePMEMoid dest,
+	int before, SafePMEMoid oid);
+
 #ifdef __cplusplus
 }
 #endif

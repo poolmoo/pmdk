@@ -35,6 +35,9 @@ LOG_TESTS = \
 OBJ_DEPS = \
 	obj_list
 
+SAFE_OBJ_TESTS = \
+	safe_obj_alloc
+
 # long tests first
 OBJ_TESTS = \
 	obj_basic_integration\
@@ -293,7 +296,7 @@ PMREORDER_TESTS = \
 	pmreorder_stack
 
 LOCAL_TESTS = \
-	$(OBJ_TESTS)\
+	$(SAFE_OBJ_TESTS)\
 	$(BLK_TESTS)\
 	$(LOG_TESTS)\
 	$(OTHER_TESTS)\
@@ -373,7 +376,6 @@ clean clobber: $(TESTS_BUILD)
 
 $(TESTS) $(OBJ_DEPS) $(LIBPMEMPOOL_DEPS) $(LIBPMEMPOOL_MOD_DEPS): $(TEST_DEPS)
 
-$(OBJ_TESTS): $(OBJ_DEPS)
 $(OBJ_REMOTE_TESTS): $(OBJ_REMOTE_DEPS)
 $(LIBPMEMPOOL_TESTS): $(LIBPMEMPOOL_DEPS)
 $(LIBPMEMPOOL_MOD_TESTS): $(LIBPMEMPOOL_MOD_DEPS)
@@ -443,7 +445,7 @@ pcheck-log: $(LOG_TESTS)
 	@echo "No failures."
 
 pcheck-obj: TARGET = pcheck
-pcheck-obj: $(OBJ_TESTS)
+pcheck-obj: $(SAFE_OBJ_TESTS)
 	@echo "No failures."
 
 pcheck-other: TARGET = pcheck

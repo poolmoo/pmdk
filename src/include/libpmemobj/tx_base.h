@@ -207,6 +207,11 @@ int pmemobj_tx_errno(void);
 int pmemobj_tx_add_range(PMEMoid oid, uint64_t off, size_t size);
 
 /*
+ * pmemobj_tx_add_range wrapper for safe objects.
+ */
+int safe_pmemobj_tx_add_range(SafePMEMoid oid, uint64_t off, size_t size);
+
+/*
  * Takes a "snapshot" of the given memory region and saves it in the undo log.
  * The application is then free to directly modify the object in that memory
  * range. In case of failure or abort, all the changes within this range will
@@ -233,6 +238,12 @@ int pmemobj_tx_xadd_range(PMEMoid oid, uint64_t off, size_t size,
 		uint64_t flags);
 
 /*
+ * pmemobj_tx_xadd_range wrapper for safe objects.
+ */
+int safe_pmemobj_tx_xadd_range(SafePMEMoid oid, uint64_t off, size_t size,
+		uint64_t flags);
+
+/*
  * Behaves exactly the same as pmemobj_tx_add_range_direct when 'flags' equals
  * 0. 'Flags' is a bitmask of the following values:
  *  - POBJ_XADD_NO_FLUSH - skips flush on commit
@@ -254,6 +265,11 @@ int pmemobj_tx_xadd_range_direct(const void *ptr, size_t size, uint64_t flags);
 PMEMoid pmemobj_tx_alloc(size_t size, uint64_t type_num);
 
 /*
+ * pmemobj_tx_alloc wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_alloc(size_t size, uint64_t type_num);
+
+/*
  * Transactionally allocates a new object.
  *
  * If successful, returns PMEMoid.
@@ -269,6 +285,11 @@ PMEMoid pmemobj_tx_alloc(size_t size, uint64_t type_num);
 PMEMoid pmemobj_tx_xalloc(size_t size, uint64_t type_num, uint64_t flags);
 
 /*
+ * pmemobj_tx_xalloc wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_xalloc(size_t size, uint64_t type_num, uint64_t flags);
+
+/*
  * Transactionally allocates new zeroed object.
  *
  * If successful, returns PMEMoid.
@@ -277,6 +298,11 @@ PMEMoid pmemobj_tx_xalloc(size_t size, uint64_t type_num, uint64_t flags);
  * This function must be called during TX_STAGE_WORK.
  */
 PMEMoid pmemobj_tx_zalloc(size_t size, uint64_t type_num);
+
+/*
+ * pmemobj_tx_zalloc wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_zalloc(size_t size, uint64_t type_num);
 
 /*
  * Transactionally resizes an existing object.
@@ -289,6 +315,11 @@ PMEMoid pmemobj_tx_zalloc(size_t size, uint64_t type_num);
 PMEMoid pmemobj_tx_realloc(PMEMoid oid, size_t size, uint64_t type_num);
 
 /*
+ * pmemobj_tx_realloc wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_realloc(SafePMEMoid oid, size_t size, uint64_t type_num);
+
+/*
  * Transactionally resizes an existing object, if extended new space is zeroed.
  *
  * If successful, returns PMEMoid.
@@ -299,6 +330,11 @@ PMEMoid pmemobj_tx_realloc(PMEMoid oid, size_t size, uint64_t type_num);
 PMEMoid pmemobj_tx_zrealloc(PMEMoid oid, size_t size, uint64_t type_num);
 
 /*
+ * pmemobj_tx_zrealloc wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_zrealloc(SafePMEMoid oid, size_t size, uint64_t type_num);
+
+/*
  * Transactionally allocates a new object with duplicate of the string s.
  *
  * If successful, returns PMEMoid.
@@ -307,6 +343,11 @@ PMEMoid pmemobj_tx_zrealloc(PMEMoid oid, size_t size, uint64_t type_num);
  * This function must be called during TX_STAGE_WORK.
  */
 PMEMoid pmemobj_tx_strdup(const char *s, uint64_t type_num);
+
+/*
+ * pmemobj_tx_strdup wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_strdup(const char *s, uint64_t type_num);
 
 /*
  * Transactionally allocates a new object with duplicate of the string s.
@@ -324,6 +365,11 @@ PMEMoid pmemobj_tx_strdup(const char *s, uint64_t type_num);
 PMEMoid pmemobj_tx_xstrdup(const char *s, uint64_t type_num, uint64_t flags);
 
 /*
+ * pmemobj_tx_xstrdup wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_xstrdup(const char *s, uint64_t type_num, uint64_t flags);
+
+/*
  * Transactionally allocates a new object with duplicate of the wide character
  * string s.
  *
@@ -333,6 +379,11 @@ PMEMoid pmemobj_tx_xstrdup(const char *s, uint64_t type_num, uint64_t flags);
  * This function must be called during TX_STAGE_WORK.
  */
 PMEMoid pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num);
+
+/*
+ * pmemobj_tx_wcsdup wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num);
 
 /*
  * Transactionally allocates a new object with duplicate of the wide character
@@ -351,6 +402,11 @@ PMEMoid pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num);
 PMEMoid pmemobj_tx_xwcsdup(const wchar_t *s, uint64_t type_num, uint64_t flags);
 
 /*
+ * pmemobj_tx_xwcsdup wrapper for safe objects.
+ */
+SafePMEMoid safe_pmemobj_tx_xwcsdup(const wchar_t *s, uint64_t type_num, uint64_t flags);
+
+/*
  * Transactionally frees an existing object.
  *
  * If successful, returns zero.
@@ -359,6 +415,11 @@ PMEMoid pmemobj_tx_xwcsdup(const wchar_t *s, uint64_t type_num, uint64_t flags);
  * This function must be called during TX_STAGE_WORK.
  */
 int pmemobj_tx_free(PMEMoid oid);
+
+/*
+ * pmemobj_tx_free wrapper for safe objects.
+ */
+int safe_pmemobj_tx_free(SafePMEMoid oid);
 
 /*
  * Transactionally frees an existing object.
@@ -373,6 +434,11 @@ int pmemobj_tx_free(PMEMoid oid);
  * This function must be called during TX_STAGE_WORK.
  */
 int pmemobj_tx_xfree(PMEMoid oid, uint64_t flags);
+
+/*
+ * pmemobj_tx_xfree wrapper for safe objects.
+ */
+int safe_pmemobj_tx_xfree(SafePMEMoid oid, uint64_t flags);
 
 /*
  * Append user allocated buffer to the ulog.

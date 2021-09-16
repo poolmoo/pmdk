@@ -9,9 +9,13 @@
 #define LIBPMEMOBJ_POOL_H 1
 
 #include <libpmemobj/pool_base.h>
+#include <libpmemobj/safe_types.h>
 #include <libpmemobj/types.h>
 
 #define POBJ_ROOT(pop, t) (\
 (TOID(t))pmemobj_root((pop), sizeof(t)))
+
+#define S_POBJ_ROOT(pop, t) (\
+(S_TOID(t))safe_pmemobj_root((pop), sizeof(t)))
 
 #endif	/* libpmemobj/pool.h */

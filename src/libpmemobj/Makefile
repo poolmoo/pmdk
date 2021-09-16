@@ -29,6 +29,8 @@ SOURCE +=\
 	palloc.c\
 	pmalloc.c\
 	recycler.c\
+	safe_list_wrappers.c\
+	safe_obj.c\
 	sync.c\
 	tx.c\
 	stats.c\
