@@ -35,7 +35,7 @@ PMEMobjpool *safe_pmemobj_pool_by_oid(SafePMEMoid oid);
 
 #ifndef _WIN32
 
-extern int _pobj_cache_invalidate;
+extern int _s_pobj_cache_invalidate;
 
 /*
  * Returns the direct pointer of an object.
@@ -47,9 +47,9 @@ safe_pmemobj_direct_inline(SafePMEMoid oid)
 		return NULL;
 
 	struct _pobj_pcache *cache = &_pobj_cached_pool;
-	if (_pobj_cache_invalidate != cache->invalidate ||
+	if (_s_pobj_cache_invalidate != cache->invalidate ||
 	    cache->uuid_lo != oid.pool_uuid_lo) {
-		cache->invalidate = _pobj_cache_invalidate;
+		cache->invalidate = _s_pobj_cache_invalidate;
 
 		if (!(cache->pop = safe_pmemobj_pool_by_oid(oid))) {
 			cache->uuid_lo = 0;

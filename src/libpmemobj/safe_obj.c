@@ -1,5 +1,5 @@
 /*
- * obj.c -- transactional object store implementation
+ * safe_obj.c -- transactional safe object store implementation
  */
 #include <inttypes.h>
 #include <limits.h>
@@ -10,12 +10,12 @@
 #include "ctl_global.h"
 #include "libpmem.h"
 #include "libpmemobj/base.h"
-#include "libpmemobj/safe_base.h"
-#include "list.h"
 #include "memblock.h"
 #include "mmap.h"
 #include "obj.h"
 #include "ravl.h"
+#include "libpmemobj/safe_base.h"
+#include "safe_list_wrappers.h"
 #include "safe_obj.h"
 #include "valgrind_internal.h"
 
@@ -29,6 +29,8 @@
 #include "tx.h"
 
 static struct critnib *pools_ht;   /* hash table used for searching by UUID */
+
+int _s_pobj_cache_invalidate;
 
 #ifndef _WIN32
 
@@ -71,40 +73,40 @@ _Cached_pool_key_alloc(void)
 	if (pth_ret)
 		FATAL("!os_tls_key_create");
 }
-//
-///*
-// * safe_pmemobj_direct -- returns the direct pointer of a safe object
-// */
-//void *
-//safe_pmemobj_direct(SafePMEMoid oid)
-//{
-//	if (oid.off == 0 || oid.pool_uuid_lo == 0)
-//		return NULL;
-//
-//	struct _pobj_pcache *pcache = os_tls_get(Cached_pool_key);
-//	if (pcache == NULL) {
-//		pcache = calloc(sizeof(struct _pobj_pcache), 1);
-//		if (pcache == NULL)
-//			FATAL("!pcache malloc");
-//		int ret = os_tls_set(Cached_pool_key, pcache);
-//		if (ret)
-//			FATAL("!os_tls_set");
-//	}
-//
-//	if (_pobj_cache_invalidate != pcache->invalidate ||
-//	    pcache->uuid_lo != oid.pool_uuid_lo) {
-//		pcache->invalidate = _pobj_cache_invalidate;
-//
-//		if ((pcache->pop = safe_pmemobj_pool_by_oid(oid)) == NULL) {
-//			pcache->uuid_lo = 0;
-//			return NULL;
-//		}
-//
-//		pcache->uuid_lo = oid.pool_uuid_lo;
-//	}
-//
-//	return (void *)((uintptr_t)pcache->pop + oid.off);
-//}
+
+/*
+ * safe_pmemobj_direct -- returns the direct pointer of a safe object
+ */
+void *
+safe_pmemobj_direct(SafePMEMoid oid)
+{
+	if (oid.off == 0 || oid.pool_uuid_lo == 0 || oid.up_bnd == 0)
+		return NULL;
+
+	struct _pobj_pcache *pcache = os_tls_get(Cached_pool_key);
+	if (pcache == NULL) {
+		pcache = calloc(sizeof(struct _pobj_pcache), 1);
+		if (pcache == NULL)
+			FATAL("!pcache malloc");
+		int ret = os_tls_set(Cached_pool_key, pcache);
+		if (ret)
+			FATAL("!os_tls_set");
+	}
+
+	if (_s_pobj_cache_invalidate != pcache->invalidate ||
+	    pcache->uuid_lo != oid.pool_uuid_lo) {
+		pcache->invalidate = _s_pobj_cache_invalidate;
+
+		if ((pcache->pop = safe_pmemobj_pool_by_oid(oid)) == NULL) {
+			pcache->uuid_lo = 0;
+			return NULL;
+		}
+
+		pcache->uuid_lo = oid.pool_uuid_lo;
+	}
+
+	return (void *)((uintptr_t)pcache->pop + oid.off);
+}
 
 #endif /* _WIN32 */
 
@@ -120,7 +122,9 @@ safe_pmemobj_oid(const void *addr)
 	if (pop == NULL)
 		return SAFE_OID_NULL;
 
-	SafePMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop, 0};
+	SafePMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop,
+			   (uintptr_t)addr};
+
 	return oid;
 }
 
@@ -148,7 +152,7 @@ struct constr_args {
 
 
 /*
- * constructor_alloc -- (internal) constructor for obj_alloc_construct
+ * constructor_alloc -- (internal) constructor for safe_obj_alloc_construct
  */
 static int
 safe_constructor_alloc(void *ctx, void *ptr, size_t usable_size, void *arg)
@@ -203,6 +207,10 @@ safe_obj_alloc_construct(PMEMobjpool *pop, SafePMEMoid *oidp, size_t size,
 		&pop->heap, 0, oidp != NULL ? &oidp->off : NULL, size,
 		safe_constructor_alloc, &carg, type_num, 0,
 		CLASS_ID_FROM_FLAG(flags), ARENA_ID_FROM_FLAG(flags), ctx);
+
+	if (ret == 0) {
+		oidp->up_bnd = (uintptr_t)pop + oidp->off + (uint64_t)size;
+	}
 
 	pmalloc_operation_release(pop);
 	return ret;
@@ -536,12 +544,6 @@ safe_pmemobj_strdup(PMEMobjpool *pop, SafePMEMoid *oidp, const char *s,
 	return ret;
 }
 
-///* arguments for constructor_wcsdup */
-//struct carg_wcsdup {
-//	size_t size;
-//	const wchar_t *s;
-//};
-
 /*
  * safe_pmemobj_free -- frees an existing object
  */
@@ -683,6 +685,7 @@ safe_pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 
 	root.pool_uuid_lo = pop->uuid_lo;
 	root.off = pop->root_offset;
+	root.up_bnd = (uintptr_t)pop + root.off + (uint64_t)size;
 
 	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
 
@@ -691,7 +694,7 @@ safe_pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 }
 
 /*
- * safe_pmemobj_root -- returns root object
+ * safe_pmemobj_root -- returns safe root object
  */
 SafePMEMoid
 safe_pmemobj_root(PMEMobjpool *pop, size_t size)
@@ -700,62 +703,63 @@ safe_pmemobj_root(PMEMobjpool *pop, size_t size)
 
 	PMEMOBJ_API_START();
 	SafePMEMoid oid = safe_pmemobj_root_construct(pop, size, NULL, NULL);
+
 	PMEMOBJ_API_END();
 	return oid;
 }
-//
-///*
-// * safe_pmemobj_first - returns first object of specified type
-// */
-//SafePMEMoid
-//safe_pmemobj_first(PMEMobjpool *pop)
-//{
-//	LOG(3, "pop %p", pop);
-//
-//	SafePMEMoid ret = {0, 0, 0};
-//
-//	uint64_t off = palloc_first(&pop->heap);
-//	if (off != 0) {
-//		ret.off = off;
-//		ret.pool_uuid_lo = pop->uuid_lo;
-//
-//		if (palloc_flags(&pop->heap, off) & OBJ_INTERNAL_OBJECT_MASK) {
-//			return safe_pmemobj_next(ret);
-//		}
-//	}
-//
-//	return ret;
-//}
-//
-///*
-// * safe_pmemobj_next - returns next object of specified type
-// */
-//SafePMEMoid
-//safe_pmemobj_next(SafePMEMoid oid)
-//{
-//	LOG(3, "oid.off 0x%016" PRIx64, oid.off);
-//
-//	SafePMEMoid curr = oid;
-//	if (curr.off == 0)
-//		return SAFE_OID_NULL;
-//
-//	PMEMobjpool *pop = safe_pmemobj_pool_by_oid(curr);
-//	ASSERTne(pop, NULL);
-//
-//	do {
-//		ASSERT(SAFE_OBJ_OID_IS_VALID(pop, curr));
-//		uint64_t next_off = palloc_next(&pop->heap, curr.off);
-//
-//		if (next_off == 0)
-//			return SAFE_OID_NULL;
-//
-//		/* next object exists */
-//		curr.off = next_off;
-//
-//	} while (palloc_flags(&pop->heap, curr.off) & OBJ_INTERNAL_OBJECT_MASK);
-//
-//	return curr;
-//}
+
+/*
+ * safe_pmemobj_first - returns first object of specified type
+ */
+SafePMEMoid
+safe_pmemobj_first(PMEMobjpool *pop)
+{
+	LOG(3, "pop %p", pop);
+
+	SafePMEMoid ret = {0, 0, 0};
+
+	uint64_t off = palloc_first(&pop->heap);
+	if (off != 0) {
+		ret.off = off;
+		ret.pool_uuid_lo = pop->uuid_lo;
+
+		if (palloc_flags(&pop->heap, off) & OBJ_INTERNAL_OBJECT_MASK) {
+			return safe_pmemobj_next(ret);
+		}
+	}
+
+	return ret;
+}
+
+/*
+ * safe_pmemobj_next - returns next object of specified type
+ */
+SafePMEMoid
+safe_pmemobj_next(SafePMEMoid oid)
+{
+	LOG(3, "oid.off 0x%016" PRIx64, oid.off);
+
+	SafePMEMoid curr = oid;
+	if (curr.off == 0)
+		return SAFE_OID_NULL;
+
+	PMEMobjpool *pop = safe_pmemobj_pool_by_oid(curr);
+	ASSERTne(pop, NULL);
+
+	do {
+		ASSERT(SAFE_OBJ_OID_IS_VALID(pop, curr));
+		uint64_t next_off = palloc_next(&pop->heap, curr.off);
+
+		if (next_off == 0)
+			return SAFE_OID_NULL;
+
+		/* next object exists */
+		curr.off = next_off;
+
+	} while (palloc_flags(&pop->heap, curr.off) & OBJ_INTERNAL_OBJECT_MASK);
+
+	return curr;
+}
 
 /*
  * safe_pmemobj_reserve -- reserves a single object
@@ -778,241 +782,243 @@ safe_pmemobj_reserve(PMEMobjpool *pop, struct pobj_action *act, size_t size,
 
 	oid.off = act->heap.offset;
 	oid.pool_uuid_lo = pop->uuid_lo;
+	oid.up_bnd = (uintptr_t)pop + oid.off + (uint64_t)size;
 
 	PMEMOBJ_API_END();
 	return oid;
 }
-//
-///*
-// * safe_pmemobj_xreserve -- reserves a single object
-// */
-//SafePMEMoid
-//safe_pmemobj_xreserve(PMEMobjpool *pop, struct pobj_action *act, size_t size,
-//		 uint64_t type_num, uint64_t flags)
-//{
-//	LOG(3, "pop %p act %p size %zu type_num %llx flags %llx", pop, act,
-//	    size, (unsigned long long)type_num, (unsigned long long)flags);
-//
-//	SafePMEMoid oid = SAFE_OID_NULL;
-//
-//	if (flags & ~POBJ_ACTION_XRESERVE_VALID_FLAGS) {
-//		ERR("unknown flags 0x%" PRIx64,
-//		    flags & ~POBJ_ACTION_XRESERVE_VALID_FLAGS);
-//		errno = EINVAL;
-//		return oid;
-//	}
-//
-//	PMEMOBJ_API_START();
-//	struct constr_args carg;
-//
-//	carg.zero_init = flags & POBJ_FLAG_ZERO;
-//	carg.constructor = NULL;
-//	carg.arg = NULL;
-//
-//	if (palloc_reserve(&pop->heap, size, safe_constructor_alloc, &carg, type_num,
-//			   0, CLASS_ID_FROM_FLAG(flags),
-//			   ARENA_ID_FROM_FLAG(flags), act) != 0) {
-//		PMEMOBJ_API_END();
-//		return oid;
-//	}
-//
-//	oid.off = act->heap.offset;
-//	oid.pool_uuid_lo = pop->uuid_lo;
-//
-//	PMEMOBJ_API_END();
-//	return oid;
-//}
-//
-///*
-// * safe_pmemobj_defer_free -- creates a deferred free action
-// */
-//void
-//safe_pmemobj_defer_free(PMEMobjpool *pop, SafePMEMoid oid, struct pobj_action *act)
-//{
-//	ASSERT(!OID_IS_NULL(oid));
-//	palloc_defer_free(&pop->heap, oid.off, act);
-//}
-//
-///*
-// * safe_pmemobj_defrag -- reallocates provided SafePMEMoids so that the underlying memory
-// *	is efficiently arranged.
-// */
-//int
-//safe_pmemobj_defrag(PMEMobjpool *pop, SafePMEMoid **oidv, size_t oidcnt,
-//	       struct pobj_defrag_result *result)
-//{
-//	PMEMOBJ_API_START();
-//
-//	if (result) {
-//		result->relocated = 0;
-//		result->total = 0;
-//	}
-//
-//	uint64_t **objv = Malloc(sizeof(uint64_t *) * oidcnt);
-//	if (objv == NULL)
-//		return -1;
-//
-//	int ret = 0;
-//
-//	size_t j = 0;
-//	for (size_t i = 0; i < oidcnt; ++i) {
-//		if (OID_IS_NULL(*oidv[i]))
-//			continue;
-//		if (oidv[i]->pool_uuid_lo != pop->uuid_lo) {
-//			ret = -1;
-//			ERR("Not all SafePMEMoids belong to the provided pool");
-//			goto out;
-//		}
-//		objv[j++] = &oidv[i]->off;
-//	}
-//
-//	struct operation_context *ctx = pmalloc_operation_hold(pop);
-//
-//	ret = palloc_defrag(&pop->heap, objv, j, ctx, result);
-//
-//	pmalloc_operation_release(pop);
-//
-//out:
-//	Free(objv);
-//
-//	PMEMOBJ_API_END();
-//	return ret;
-//}
-//
-///*
-// * safe_pmemobj_list_insert -- adds object to a list
-// */
-//int
-//safe_pmemobj_list_insert(PMEMobjpool *pop, size_t pe_offset, void *head,
-//		    SafePMEMoid dest, int before, SafePMEMoid oid)
-//{
-//	LOG(3,
-//	    "pop %p pe_offset %zu head %p dest.off 0x%016" PRIx64
-//	    " before %d oid.off 0x%016" PRIx64,
-//	    pop, pe_offset, head, dest.off, before, oid.off);
-//	PMEMOBJ_API_START();
-//
-//	/* log notice message if used inside a transaction */
-//	_POBJ_DEBUG_NOTICE_IN_TX();
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
-//
-//	ASSERT(pe_offset <=
-//	       safe_pmemobj_alloc_usable_size(dest) - sizeof(struct list_entry));
-//	ASSERT(pe_offset <=
-//	       safe_pmemobj_alloc_usable_size(oid) - sizeof(struct list_entry));
-//
-//	int ret = list_insert(pop, (ssize_t)pe_offset, head, dest, before, oid);
-//
-//	PMEMOBJ_API_END();
-//	return ret;
-//}
-//
-///*
-// * safe_pmemobj_list_insert_new -- adds new object to a list
-// */
-//SafePMEMoid
-//safe_pmemobj_list_insert_new(PMEMobjpool *pop, size_t pe_offset, void *head,
-//			SafePMEMoid dest, int before, size_t size,
-//			uint64_t type_num, pmemobj_constr constructor,
-//			void *arg)
-//{
-//	LOG(3,
-//	    "pop %p pe_offset %zu head %p dest.off 0x%016" PRIx64
-//	    " before %d size %zu type_num %" PRIu64,
-//	    pop, pe_offset, head, dest.off, before, size, type_num);
-//
-//	/* log notice message if used inside a transaction */
-//	_POBJ_DEBUG_NOTICE_IN_TX();
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
-//
-//	ASSERT(pe_offset <=
-//	       safe_pmemobj_alloc_usable_size(dest) - sizeof(struct list_entry));
-//	ASSERT(pe_offset <= size - sizeof(struct list_entry));
-//
-//	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
-//		ERR("requested size too large");
-//		errno = ENOMEM;
-//		return OID_NULL;
-//	}
-//
-//	PMEMOBJ_API_START();
-//	struct constr_args carg;
-//
-//	carg.constructor = constructor;
-//	carg.arg = arg;
-//	carg.zero_init = 0;
-//
-//	SafePMEMoid retoid = SAFE_OID_NULL;
-//	list_insert_new_user(pop, pe_offset, head, dest, before, size, type_num,
-//			     safe_constructor_alloc, &carg, &retoid);
-//
-//	PMEMOBJ_API_END();
-//	return retoid;
-//}
-//
-///*
-// * safe_pmemobj_list_remove -- removes object from a list
-// */
-//int
-//safe_pmemobj_list_remove(PMEMobjpool *pop, size_t pe_offset, void *head, SafePMEMoid oid,
-//		    int free)
-//{
-//	LOG(3, "pop %p pe_offset %zu head %p oid.off 0x%016" PRIx64 " free %d",
-//	    pop, pe_offset, head, oid.off, free);
-//	PMEMOBJ_API_START();
-//
-//	/* log notice message if used inside a transaction */
-//	_POBJ_DEBUG_NOTICE_IN_TX();
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
-//
-//	ASSERT(pe_offset <=
-//	       safe_pmemobj_alloc_usable_size(oid) - sizeof(struct list_entry));
-//
-//	int ret;
-//	if (free)
-//		ret = list_remove_free_user(pop, pe_offset, head, &oid);
-//	else
-//		ret = list_remove(pop, (ssize_t)pe_offset, head, oid);
-//
-//	PMEMOBJ_API_END();
-//	return ret;
-//}
-//
-///*
-// * pmemobj_list_move -- moves object between lists
-// */
-//int
-//safe_pmemobj_list_move(PMEMobjpool *pop, size_t pe_old_offset, void *head_old,
-//		  size_t pe_new_offset, void *head_new, SafePMEMoid dest,
-//		  int before, SafePMEMoid oid)
-//{
-//	LOG(3,
-//	    "pop %p pe_old_offset %zu pe_new_offset %zu"
-//	    " head_old %p head_new %p dest.off 0x%016" PRIx64
-//	    " before %d oid.off 0x%016" PRIx64 "",
-//	    pop, pe_old_offset, pe_new_offset, head_old, head_new, dest.off,
-//	    before, oid.off);
-//	PMEMOBJ_API_START();
-//
-//	/* log notice message if used inside a transaction */
-//	_POBJ_DEBUG_NOTICE_IN_TX();
-//
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
-//	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
-//
-//	ASSERT(pe_old_offset <= safe_pmemobj_alloc_usable_size(oid) -
-//		       sizeof(struct list_entry));
-//	ASSERT(pe_new_offset <= safe_pmemobj_alloc_usable_size(oid) -
-//		       sizeof(struct list_entry));
-//	ASSERT(pe_old_offset <= safe_pmemobj_alloc_usable_size(dest) -
-//		       sizeof(struct list_entry));
-//	ASSERT(pe_new_offset <= safe_pmemobj_alloc_usable_size(dest) -
-//		       sizeof(struct list_entry));
-//
-//	int ret = list_move(pop, pe_old_offset, head_old, pe_new_offset,
-//			    head_new, dest, before, oid);
-//
-//	PMEMOBJ_API_END();
-//	return ret;
-//}
+
+/*
+ * safe_pmemobj_xreserve -- reserves a single object
+ */
+SafePMEMoid
+safe_pmemobj_xreserve(PMEMobjpool *pop, struct pobj_action *act, size_t size,
+		 uint64_t type_num, uint64_t flags)
+{
+	LOG(3, "pop %p act %p size %zu type_num %llx flags %llx", pop, act,
+	    size, (unsigned long long)type_num, (unsigned long long)flags);
+
+	SafePMEMoid oid = SAFE_OID_NULL;
+
+	if (flags & ~POBJ_ACTION_XRESERVE_VALID_FLAGS) {
+		ERR("unknown flags 0x%" PRIx64,
+		    flags & ~POBJ_ACTION_XRESERVE_VALID_FLAGS);
+		errno = EINVAL;
+		return oid;
+	}
+
+	PMEMOBJ_API_START();
+	struct constr_args carg;
+
+	carg.zero_init = flags & POBJ_FLAG_ZERO;
+	carg.constructor = NULL;
+	carg.arg = NULL;
+
+	if (palloc_reserve(&pop->heap, size, safe_constructor_alloc, &carg, type_num,
+			   0, CLASS_ID_FROM_FLAG(flags),
+			   ARENA_ID_FROM_FLAG(flags), act) != 0) {
+		PMEMOBJ_API_END();
+		return oid;
+	}
+
+	oid.off = act->heap.offset;
+	oid.pool_uuid_lo = pop->uuid_lo;
+	oid.up_bnd = (uintptr_t)pop + oid.off + (uint64_t)size;
+
+	PMEMOBJ_API_END();
+	return oid;
+}
+
+/*
+ * safe_pmemobj_defer_free -- creates a deferred free action
+ */
+void
+safe_pmemobj_defer_free(PMEMobjpool *pop, SafePMEMoid oid, struct pobj_action *act)
+{
+	ASSERT(!OID_IS_NULL(oid));
+	palloc_defer_free(&pop->heap, oid.off, act);
+}
+
+/*
+ * safe_pmemobj_defrag -- reallocates provided SafePMEMoids so that the underlying memory
+ *	is efficiently arranged.
+ */
+int
+safe_pmemobj_defrag(PMEMobjpool *pop, SafePMEMoid **oidv, size_t oidcnt,
+	       struct pobj_defrag_result *result)
+{
+	PMEMOBJ_API_START();
+
+	if (result) {
+		result->relocated = 0;
+		result->total = 0;
+	}
+
+	uint64_t **objv = Malloc(sizeof(uint64_t *) * oidcnt);
+	if (objv == NULL)
+		return -1;
+
+	int ret = 0;
+
+	size_t j = 0;
+	for (size_t i = 0; i < oidcnt; ++i) {
+		if (OID_IS_NULL(*oidv[i]))
+			continue;
+		if (oidv[i]->pool_uuid_lo != pop->uuid_lo) {
+			ret = -1;
+			ERR("Not all SafePMEMoids belong to the provided pool");
+			goto out;
+		}
+		objv[j++] = &oidv[i]->off;
+	}
+
+	struct operation_context *ctx = pmalloc_operation_hold(pop);
+
+	ret = palloc_defrag(&pop->heap, objv, j, ctx, result);
+
+	pmalloc_operation_release(pop);
+
+out:
+	Free(objv);
+
+	PMEMOBJ_API_END();
+	return ret;
+}
+
+/*
+ * safe_pmemobj_list_insert -- adds object to a list
+ */
+int
+safe_pmemobj_list_insert(PMEMobjpool *pop, size_t pe_offset, void *head,
+		    SafePMEMoid dest, int before, SafePMEMoid oid)
+{
+	LOG(3,
+	    "pop %p pe_offset %zu head %p dest.off 0x%016" PRIx64
+	    " before %d oid.off 0x%016" PRIx64,
+	    pop, pe_offset, head, dest.off, before, oid.off);
+	PMEMOBJ_API_START();
+
+	/* log notice message if used inside a transaction */
+	_POBJ_DEBUG_NOTICE_IN_TX();
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
+
+	ASSERT(pe_offset <=
+	       safe_pmemobj_alloc_usable_size(dest) - sizeof(struct safe_list_entry));
+	ASSERT(pe_offset <=
+	       safe_pmemobj_alloc_usable_size(oid) - sizeof(struct safe_list_entry));
+
+	int ret = safe_list_insert(pop, (ssize_t)pe_offset, head, dest, before, oid);
+
+	PMEMOBJ_API_END();
+	return ret;
+}
+
+/*
+ * safe_pmemobj_list_insert_new -- adds new object to a list
+ */
+SafePMEMoid
+safe_pmemobj_list_insert_new(PMEMobjpool *pop, size_t pe_offset, void *head,
+			SafePMEMoid dest, int before, size_t size,
+			uint64_t type_num, pmemobj_constr constructor,
+			void *arg)
+{
+	LOG(3,
+	    "pop %p pe_offset %zu head %p dest.off 0x%016" PRIx64
+	    " before %d size %zu type_num %" PRIu64,
+	    pop, pe_offset, head, dest.off, before, size, type_num);
+
+	/* log notice message if used inside a transaction */
+	_POBJ_DEBUG_NOTICE_IN_TX();
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
+
+	ASSERT(pe_offset <=
+	       safe_pmemobj_alloc_usable_size(dest) - sizeof(struct safe_list_entry));
+	ASSERT(pe_offset <= size - sizeof(struct safe_list_entry));
+
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		errno = ENOMEM;
+		return SAFE_OID_NULL;
+	}
+
+	PMEMOBJ_API_START();
+	struct constr_args carg;
+
+	carg.constructor = constructor;
+	carg.arg = arg;
+	carg.zero_init = 0;
+
+	SafePMEMoid retoid = SAFE_OID_NULL;
+	safe_list_insert_new_user(pop, pe_offset, head, dest, before, size, type_num,
+			     safe_constructor_alloc, &carg, &retoid);
+
+	PMEMOBJ_API_END();
+	return retoid;
+}
+
+/*
+ * safe_pmemobj_list_remove -- removes object from a list
+ */
+int
+safe_pmemobj_list_remove(PMEMobjpool *pop, size_t pe_offset, void *head, SafePMEMoid oid,
+		    int free)
+{
+	LOG(3, "pop %p pe_offset %zu head %p oid.off 0x%016" PRIx64 " free %d",
+	    pop, pe_offset, head, oid.off, free);
+	PMEMOBJ_API_START();
+
+	/* log notice message if used inside a transaction */
+	_POBJ_DEBUG_NOTICE_IN_TX();
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
+
+	ASSERT(pe_offset <=
+	       safe_pmemobj_alloc_usable_size(oid) - sizeof(struct safe_list_entry));
+
+	int ret;
+	if (free)
+		ret = safe_list_remove_free_user(pop, pe_offset, head, &oid);
+	else
+		ret = safe_list_remove(pop, (ssize_t)pe_offset, head, oid);
+
+	PMEMOBJ_API_END();
+	return ret;
+}
+
+/*
+ * safe_pmemobj_list_move -- moves object between lists
+ */
+int
+safe_pmemobj_list_move(PMEMobjpool *pop, size_t pe_old_offset, void *head_old,
+		  size_t pe_new_offset, void *head_new, SafePMEMoid dest,
+		  int before, SafePMEMoid oid)
+{
+	LOG(3,
+	    "pop %p pe_old_offset %zu pe_new_offset %zu"
+	    " head_old %p head_new %p dest.off 0x%016" PRIx64
+	    " before %d oid.off 0x%016" PRIx64 "",
+	    pop, pe_old_offset, pe_new_offset, head_old, head_new, dest.off,
+	    before, oid.off);
+	PMEMOBJ_API_START();
+
+	/* log notice message if used inside a transaction */
+	_POBJ_DEBUG_NOTICE_IN_TX();
+
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, oid));
+	ASSERT(SAFE_OBJ_OID_IS_VALID(pop, dest));
+
+	ASSERT(pe_old_offset <= safe_pmemobj_alloc_usable_size(oid) -
+		       sizeof(struct safe_list_entry));
+	ASSERT(pe_new_offset <= safe_pmemobj_alloc_usable_size(oid) -
+		       sizeof(struct safe_list_entry));
+	ASSERT(pe_old_offset <= safe_pmemobj_alloc_usable_size(dest) -
+		       sizeof(struct safe_list_entry));
+	ASSERT(pe_new_offset <= safe_pmemobj_alloc_usable_size(dest) -
+		       sizeof(struct safe_list_entry));
+
+	int ret = safe_list_move(pop, pe_old_offset, head_old, pe_new_offset,
+			    head_new, dest, before, oid);
+
+	PMEMOBJ_API_END();
+	return ret;
+}

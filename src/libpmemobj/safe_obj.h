@@ -28,7 +28,7 @@ extern "C" {
 #include "fault_injection.h"
 
 /*
- * OBJ_OID_IS_VALID -- (internal) checks if 'oid' is valid
+ * SAFE_OBJ_OID_IS_VALID -- (internal) checks if 'oid' is valid
  */
 static inline int
 SAFE_OBJ_OID_IS_VALID(PMEMobjpool *pop, SafePMEMoid oid)
@@ -36,7 +36,9 @@ SAFE_OBJ_OID_IS_VALID(PMEMobjpool *pop, SafePMEMoid oid)
 	return OBJ_OID_IS_NULL(oid) ||
 		(oid.pool_uuid_lo == pop->uuid_lo &&
 		 oid.off >= pop->heap_offset &&
-		 oid.off < pop->heap_offset + pop->heap_size);
+		 oid.off < pop->heap_offset + pop->heap_size &&
+		 oid.up_bnd > pop->addr + oid.off && 
+		 oid.up_bnd <= &pop + safe_pmemobj_alloc_usable_size(oid));
 }
 
 #ifdef __cplusplus

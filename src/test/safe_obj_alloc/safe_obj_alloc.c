@@ -58,6 +58,8 @@ main(int argc, char *argv[])
 	int expected_return_code;
 	int expected_errno;
 	int ret;
+//	int expected_root_up_bnd;
+	int expected_obj_up_bnd;
 
 	if (argc < 8)
 		UT_FATAL("usage: %s path size type_num is_oid_null flags "
@@ -86,16 +88,18 @@ main(int argc, char *argv[])
 			is_oid_null, flags, expected_return_code,
 			expected_errno);
 
-		TOID(struct root) root = POBJ_ROOT(pop, struct root);
-
-		oidp = &D_SRW(root)->obj.oid;
+		S_TOID(struct root) root = S_POBJ_ROOT(pop, struct root);
+		
+		oidp = &S_D_RW(root)->obj.oid;
 		if (is_oid_null) {
-			TOID_ASSIGN(root, OID_NULL);
+			S_TOID_ASSIGN(root, SAFE_OID_NULL);
 			oidp = &root.oid;
 		}
 
 		ret = safe_pmemobj_xalloc(
 			pop, oidp, size, type_num, flags, NULL, NULL);
+
+		expected_obj_up_bnd = (uintptr_t)pop + oidp->off + size;
 
 		UT_ASSERTeq(ret, expected_return_code);
 		if (expected_errno != 0) {
@@ -104,16 +108,18 @@ main(int argc, char *argv[])
 
 		if (ret == 0) {
 			UT_OUT("alloc: %zu, size: %zu", size,
-				safe_pmemobj_alloc_usable_size(D_SRW(root)->obj.oid));
+				safe_pmemobj_alloc_usable_size(S_D_RW(root)->obj.oid));
+			UT_ASSERTeq(oidp.up_bnd, expected_obj_up_bnd);
+
 			if (is_oid_null == 0) {
-				UT_ASSERT(!TOID_IS_NULL(D_SRW(root)->obj));
+				UT_ASSERT(!TOID_IS_NULL(S_D_RW(root)->obj));
 				UT_ASSERT(safe_pmemobj_alloc_usable_size(
-				    D_SRW(root)->obj.oid) >= size);
+				    S_D_RW(root)->obj.oid) >= size);
 			}
 		}
 
-		pmemobj_free(&D_SRW(root)->obj.oid);
-		UT_ASSERT(TOID_IS_NULL(D_SRO(root)->obj));
+		pmemobj_free(&S_D_RW(root)->obj.oid);
+		UT_ASSERT(TOID_IS_NULL(S_D_RO(root)->obj));
 		UT_OUT("free");
 
 	}

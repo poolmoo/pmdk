@@ -1,8 +1,6 @@
 /*
  * libpmemobj/safe_types.h -- definitions of libpmemobj type-safe macros
  */
-#ifndef LIBPMEMOBJ_TYPES_H
-#define LIBPMEMOBJ_TYPES_H 1
 
 #include <libpmemobj/base.h>
 #include <libpmemobj/safe_base.h>
@@ -61,7 +59,6 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 	 (lhs).oid.up_bnd == (rhs).oid.up_bnd)
 
 /* type number of root object */
-#define POBJ_ROOT_TYPE_NUM 0
 #define _s_toid_struct
 #define _s_toid_union
 #define _s_toid_enum
@@ -105,7 +102,6 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 /*
  * Declaration of typed OID of a root object
  */
-#define S_TOID_DECLARE_ROOT(t) _S_TOID_DECLARE(t, POBJ_ROOT_TYPE_NUM)
 
 /*
  * Type number of specified type
@@ -155,14 +151,12 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 /*
  * End of layout declaration
  */
-#define POBJ_LAYOUT_END(name)                                                  \
 	typedef char _s_pobj_layout_##name##_cnt[__COUNTER__ + 1 -             \
 						 _S_POBJ_LAYOUT_REF(name)];
 
 /*
  * Number of types declared inside layout without the root object
  */
-#define POBJ_LAYOUT_TYPES_NUM(name) (sizeof(_s_pobj_layout_##name##_cnt) - 1)
 
 /*
  * Declaration of typed OID inside layout declaration
