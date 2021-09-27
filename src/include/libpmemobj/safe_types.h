@@ -110,7 +110,7 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 /*
  * Type number of specified type
  */
-#define S_TOID_TYPE_NUM(t) (sizeof(_toid_##t##_toid_type_num) - 1)
+#define S_TOID_TYPE_NUM(t) (sizeof(_s_toid_##t##_toid_type_num) - 1)
 
 /*
  * Type number of object read from typed OID
@@ -150,7 +150,7 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 /*
  * End of layout declaration
  */
-#define S_POBJ_LAYOUT_END(name)                                                  \
+#define S_POBJ_LAYOUT_END(name)                                                \
 	typedef char _s_pobj_layout_##name##_cnt[__COUNTER__ + 1 -             \
 						 _S_POBJ_LAYOUT_REF(name)];
 
@@ -170,6 +170,11 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
  */
 #define S_POBJ_LAYOUT_ROOT(name, t) S_TOID_DECLARE_ROOT(t);
 
+/*
+ * Name of declared layout
+ */
+#define S_POBJ_LAYOUT_NAME(name) #name
+
 #define S_TOID_TYPEOF(o) __typeof__(*(o)._type)
 
 #define S_TOID_OFFSETOF(o, field) offsetof(S_TOID_TYPEOF(o), field)
@@ -187,7 +192,7 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 		(void)_o;                                                      \
 		(__typeof__(*(o)._type) *)safe_pmemobj_direct((o).oid);        \
 	})
-#define DIRECT_SRO(o)                                                          \
+#define S_DIRECT_RO(o)                                                          \
 	((const __typeof__(*(o)._type) *)safe_pmemobj_direct((o).oid))
 
 #elif defined(__cplusplus)
@@ -204,7 +209,7 @@ PMEMOBJ_OFFSETOF_WA to enable workaround in libpmemobj.h"
 #endif /* (defined(_MSC_VER) || defined(__cplusplus)) */
 
 #define S_D_RW S_DIRECT_RW
-#define S_D_RO S_DIRECT_SRO
+#define S_D_RO S_DIRECT_RO
 
 #ifdef __cplusplus
 }
