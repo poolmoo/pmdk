@@ -9,10 +9,10 @@
 #include "heap.h"
 #include <limits.h>
 
-POBJ_LAYOUT_BEGIN(alloc);
-POBJ_LAYOUT_ROOT(alloc, struct root);
-POBJ_LAYOUT_TOID(alloc, struct object);
-POBJ_LAYOUT_END(alloc);
+S_POBJ_LAYOUT_BEGIN(alloc);
+S_POBJ_LAYOUT_ROOT(alloc, struct root);
+S_POBJ_LAYOUT_TOID(alloc, struct object);
+S_POBJ_LAYOUT_END(alloc);
 
 struct object {
 	size_t value;
@@ -109,7 +109,7 @@ main(int argc, char *argv[])
 		if (ret == 0) {
 			UT_OUT("alloc: %zu, size: %zu", size,
 				safe_pmemobj_alloc_usable_size(S_D_RW(root)->obj.oid));
-			UT_ASSERTeq(oidp.up_bnd, expected_obj_up_bnd);
+			UT_ASSERTeq(oidp->up_bnd, expected_obj_up_bnd);
 
 			if (is_oid_null == 0) {
 				UT_ASSERT(!TOID_IS_NULL(S_D_RW(root)->obj));
@@ -118,7 +118,7 @@ main(int argc, char *argv[])
 			}
 		}
 
-		pmemobj_free(&S_D_RW(root)->obj.oid);
+		safe_pmemobj_free(&S_D_RW(root)->obj.oid);
 		UT_ASSERT(TOID_IS_NULL(S_D_RO(root)->obj));
 		UT_OUT("free");
 
