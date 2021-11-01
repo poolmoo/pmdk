@@ -40,8 +40,8 @@ struct root {
 		(b) = _tmp;                                                    \
 	} while (0)
 
-/* Values less than 2048 is not suitable for current rtree implementation */
-#define SIZE_PER_KEY 2048
+/* Values less than 3072 is not suitable for current rtree implementation */
+#define SIZE_PER_KEY 3072
 
 static const struct {
 	const char *str;
