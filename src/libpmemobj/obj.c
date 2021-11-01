@@ -240,7 +240,7 @@ pmemobj_oid(const void *addr)
 	if (pop == NULL)
 		return OID_NULL;
 
-	PMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop};
+	PMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop, 0};
 	return oid;
 }
 
@@ -2195,6 +2195,10 @@ obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 			CLASS_ID_FROM_FLAG(flags), ARENA_ID_FROM_FLAG(flags),
 			ctx);
 
+	if (ret == 0) {
+		oidp->size = size;
+	}
+
 	pmalloc_operation_release(pop);
 
 	return ret;
@@ -2893,6 +2897,7 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 
 	root.pool_uuid_lo = pop->uuid_lo;
 	root.off = pop->root_offset;
+	root.size = size;
 
 	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
 
@@ -2922,7 +2927,7 @@ pmemobj_first(PMEMobjpool *pop)
 {
 	LOG(3, "pop %p", pop);
 
-	PMEMoid ret = {0, 0};
+	PMEMoid ret = {0, 0, 0};
 
 	uint64_t off = palloc_first(&pop->heap);
 	if (off != 0) {
@@ -2989,6 +2994,7 @@ pmemobj_reserve(PMEMobjpool *pop, struct pobj_action *act,
 
 	oid.off = act->heap.offset;
 	oid.pool_uuid_lo = pop->uuid_lo;
+	oid.size = size;
 
 	PMEMOBJ_API_END();
 	return oid;
@@ -3030,6 +3036,7 @@ pmemobj_xreserve(PMEMobjpool *pop, struct pobj_action *act,
 
 	oid.off = act->heap.offset;
 	oid.pool_uuid_lo = pop->uuid_lo;
+	oid.size = size;
 
 	PMEMOBJ_API_END();
 	return oid;
