@@ -47,6 +47,32 @@ void tx_ctl_register(PMEMobjpool *pop);
 struct tx_parameters *tx_params_new(void);
 void tx_params_delete(struct tx_parameters *tx_params);
 
+/*
+ * SPP wrapped functions
+ */
+
+PMEMoid pmemobj_tx_alloc_unsafe(size_t size, uint64_t type_num);
+
+PMEMoid pmemobj_tx_xalloc_unsafe(size_t size, uint64_t type_num, uint64_t flags);
+
+PMEMoid pmemobj_tx_zalloc_unsafe(size_t size, uint64_t type_num);
+
+PMEMoid pmemobj_tx_zrealloc_unsafe(PMEMoid oid, size_t size, uint64_t type_num);
+
+int pmemobj_tx_free_unsafe(PMEMoid oid);
+
+int pmemobj_tx_xfree_unsafe(PMEMoid oid, uint64_t flags);
+
+PMEMoid pmemobj_tx_realloc_unsafe(PMEMoid oid, size_t size, uint64_t type_num);
+
+int pmemobj_tx_add_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size);
+
+int pmemobj_tx_xadd_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size, uint64_t flags);
+
+int pmemobj_tx_add_range_direct_unsafe(const void *ptr, size_t size);
+
+int pmemobj_tx_xadd_range_direct_unsafe(const void *ptr, size_t size, uint64_t flags);
+
 #ifdef __cplusplus
 }
 #endif

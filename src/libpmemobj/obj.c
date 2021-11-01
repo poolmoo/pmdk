@@ -1415,7 +1415,7 @@ err:
  * pmemobj_create -- create a transactional memory pool (set)
  */
 PMEMobjpool *
-pmemobj_create(const char *path, const char *layout,
+pmemobj_create_unsafe(const char *path, const char *layout,
 		size_t poolsize, mode_t mode)
 {
 	PMEMOBJ_API_START();
@@ -1804,7 +1804,7 @@ pmemobj_openU(const char *path, const char *layout)
  * pmemobj_open -- open a transactional memory pool
  */
 PMEMobjpool *
-pmemobj_open(const char *path, const char *layout)
+pmemobj_open_unsafe(const char *path, const char *layout)
 {
 	PMEMOBJ_API_START();
 
@@ -1936,7 +1936,7 @@ obj_pool_cleanup(PMEMobjpool *pop)
  * pmemobj_close -- close a transactional memory pool
  */
 void
-pmemobj_close(PMEMobjpool *pop)
+pmemobj_close_unsafe(PMEMobjpool *pop)
 {
 	LOG(3, "pop %p", pop);
 	PMEMOBJ_API_START();
@@ -2208,7 +2208,7 @@ obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
  * pmemobj_alloc -- allocates a new object
  */
 int
-pmemobj_alloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+pmemobj_alloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 	uint64_t type_num, pmemobj_constr constructor, void *arg)
 {
 	LOG(3, "pop %p oidp %p size %zu type_num %llx constructor %p arg %p",
@@ -2236,7 +2236,7 @@ pmemobj_alloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
  * pmemobj_xalloc -- allocates with flags
  */
 int
-pmemobj_xalloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+pmemobj_xalloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 	uint64_t type_num, uint64_t flags,
 	pmemobj_constr constructor, void *arg)
 {
@@ -2285,7 +2285,7 @@ struct carg_realloc {
  * pmemobj_zalloc -- allocates a new zeroed object
  */
 int
-pmemobj_zalloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+pmemobj_zalloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 		uint64_t type_num)
 {
 	LOG(3, "pop %p oidp %p size %zu type_num %llx",
@@ -2434,7 +2434,7 @@ constructor_zrealloc_root(void *ctx, void *ptr, size_t usable_size, void *arg)
  * pmemobj_realloc -- resizes an existing object
  */
 int
-pmemobj_realloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+pmemobj_realloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 		uint64_t type_num)
 {
 	ASSERTne(oidp, NULL);
@@ -2457,7 +2457,7 @@ pmemobj_realloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
  * pmemobj_zrealloc -- resizes an existing object, any new space is zeroed.
  */
 int
-pmemobj_zrealloc(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+pmemobj_zrealloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 		uint64_t type_num)
 {
 	ASSERTne(oidp, NULL);
@@ -2592,7 +2592,7 @@ pmemobj_wcsdup(PMEMobjpool *pop, PMEMoid *oidp, const wchar_t *s,
  * pmemobj_free -- frees an existing object
  */
 void
-pmemobj_free(PMEMoid *oidp)
+pmemobj_free_unsafe(PMEMoid *oidp)
 {
 	ASSERTne(oidp, NULL);
 
@@ -2618,7 +2618,7 @@ pmemobj_free(PMEMoid *oidp)
  * pmemobj_alloc_usable_size -- returns usable size of object
  */
 size_t
-pmemobj_alloc_usable_size(PMEMoid oid)
+pmemobj_alloc_usable_size_unsafe(PMEMoid oid)
 {
 	LOG(3, "oid.off 0x%016" PRIx64, oid.off);
 
@@ -2790,7 +2790,7 @@ pmemobj_drain(PMEMobjpool *pop)
  * pmemobj_type_num -- returns type number of object
  */
 uint64_t
-pmemobj_type_num(PMEMoid oid)
+pmemobj_type_num_unsafe(PMEMoid oid)
 {
 	LOG(3, "oid.off 0x%016" PRIx64, oid.off);
 
@@ -2909,7 +2909,7 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
  * pmemobj_root -- returns root object
  */
 PMEMoid
-pmemobj_root(PMEMobjpool *pop, size_t size)
+pmemobj_root_unsafe(PMEMobjpool *pop, size_t size)
 {
 	LOG(3, "pop %p size %zu", pop, size);
 
@@ -2923,7 +2923,7 @@ pmemobj_root(PMEMobjpool *pop, size_t size)
  * pmemobj_first - returns first object of specified type
  */
 PMEMoid
-pmemobj_first(PMEMobjpool *pop)
+pmemobj_first_unsafe(PMEMobjpool *pop)
 {
 	LOG(3, "pop %p", pop);
 
@@ -2946,7 +2946,7 @@ pmemobj_first(PMEMobjpool *pop)
  * pmemobj_next - returns next object of specified type
  */
 PMEMoid
-pmemobj_next(PMEMoid oid)
+pmemobj_next_unsafe(PMEMoid oid)
 {
 	LOG(3, "oid.off 0x%016" PRIx64, oid.off);
 

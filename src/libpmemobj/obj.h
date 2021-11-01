@@ -282,6 +282,44 @@ pmemobj_fault_injection_enabled(void)
 }
 #endif
 
+/*
+ * SPP wrapped functions
+ */
+
+PMEMobjpool *pmemobj_create_unsafe(const char *path, const char *layout,
+		size_t poolsize, mode_t mode);
+
+PMEMobjpool *pmemobj_open_unsafe(const char *path, const char *layout);
+
+void pmemobj_close_unsafe(PMEMobjpool *pop);
+
+size_t pmemobj_alloc_usable_size_unsafe(PMEMoid oid);
+
+size_t pmemobj_root_size_unsafe(PMEMobjpool *pop);
+
+PMEMoid pmemobj_root_unsafe(PMEMobjpool *pop, size_t size);
+
+uint64_t pmemobj_type_num_unsafe(PMEMoid oid);
+
+int pmemobj_alloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+    uint64_t type_num, pmemobj_constr constructor, void *arg);
+
+int pmemobj_zalloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+    uint64_t type_num);
+
+int pmemobj_xalloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+	uint64_t type_num, uint64_t flags, pmemobj_constr constructor, void *arg);
+
+int pmemobj_realloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size, uint64_t type_num);
+
+int pmemobj_zrealloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size, uint64_t type_num);
+
+void pmemobj_free_unsafe(PMEMoid *oidp);
+
+PMEMoid pmemobj_first_unsafe(PMEMobjpool *pop);
+
+PMEMoid pmemobj_next_unsafe(PMEMoid oid);
+
 #ifdef __cplusplus
 }
 #endif

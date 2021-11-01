@@ -32,7 +32,8 @@ SOURCE +=\
 	sync.c\
 	tx.c\
 	stats.c\
-	ulog.c
+	ulog.c\
+	spp_wrappers.c
 
 include ../Makefile.inc
 

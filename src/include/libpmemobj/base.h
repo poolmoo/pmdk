@@ -90,10 +90,17 @@ typedef struct pmemoid {
 
 static const PMEMoid OID_NULL = { 0, 0, 0 };
 #define OID_IS_NULL(o)	((o).off == 0)
+//Dimitris: the check for the size might be redundant here
 #define OID_EQUALS(lhs, rhs)\
 ((lhs).off == (rhs).off &&\
-	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo) &&\
+	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo &&\
 	(lhs).size == (rhs).size)
+
+/*
+#define OID_EQUALS(lhs, rhs)\
+((lhs).off == (rhs).off &&\
+	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo)
+*/
 
 PMEMobjpool *pmemobj_pool_by_ptr(const void *addr);
 PMEMobjpool *pmemobj_pool_by_oid(PMEMoid oid);

@@ -1375,7 +1375,7 @@ pmemobj_tx_add_common(struct tx *tx, struct tx_range_def *args)
  *					transaction
  */
 int
-pmemobj_tx_add_range_direct(const void *ptr, size_t size)
+pmemobj_tx_add_range_direct_unsafe(const void *ptr, size_t size)
 {
 	LOG(3, NULL);
 
@@ -1413,7 +1413,7 @@ pmemobj_tx_add_range_direct(const void *ptr, size_t size)
  *					transaction
  */
 int
-pmemobj_tx_xadd_range_direct(const void *ptr, size_t size, uint64_t flags)
+pmemobj_tx_xadd_range_direct_unsafe(const void *ptr, size_t size, uint64_t flags)
 {
 	LOG(3, NULL);
 
@@ -1458,7 +1458,7 @@ pmemobj_tx_xadd_range_direct(const void *ptr, size_t size, uint64_t flags)
  * pmemobj_tx_add_range -- adds persistent memory range into the transaction
  */
 int
-pmemobj_tx_add_range(PMEMoid oid, uint64_t hoff, size_t size)
+pmemobj_tx_add_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size)
 {
 	LOG(3, NULL);
 
@@ -1496,7 +1496,7 @@ pmemobj_tx_add_range(PMEMoid oid, uint64_t hoff, size_t size)
  * pmemobj_tx_xadd_range -- adds persistent memory range into the transaction
  */
 int
-pmemobj_tx_xadd_range(PMEMoid oid, uint64_t hoff, size_t size, uint64_t flags)
+pmemobj_tx_xadd_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size, uint64_t flags)
 {
 	LOG(3, NULL);
 
@@ -1542,7 +1542,7 @@ pmemobj_tx_xadd_range(PMEMoid oid, uint64_t hoff, size_t size, uint64_t flags)
  * pmemobj_tx_alloc -- allocates a new object
  */
 PMEMoid
-pmemobj_tx_alloc(size_t size, uint64_t type_num)
+pmemobj_tx_alloc_unsafe(size_t size, uint64_t type_num)
 {
 	LOG(3, NULL);
 
@@ -1573,7 +1573,7 @@ pmemobj_tx_alloc(size_t size, uint64_t type_num)
  * pmemobj_tx_zalloc -- allocates a new zeroed object
  */
 PMEMoid
-pmemobj_tx_zalloc(size_t size, uint64_t type_num)
+pmemobj_tx_zalloc_unsafe(size_t size, uint64_t type_num)
 {
 	LOG(3, NULL);
 	struct tx *tx = get_tx();
@@ -1604,7 +1604,7 @@ pmemobj_tx_zalloc(size_t size, uint64_t type_num)
  * pmemobj_tx_xalloc -- allocates a new object
  */
 PMEMoid
-pmemobj_tx_xalloc(size_t size, uint64_t type_num, uint64_t flags)
+pmemobj_tx_xalloc_unsafe(size_t size, uint64_t type_num, uint64_t flags)
 {
 	LOG(3, NULL);
 	struct tx *tx = get_tx();
@@ -1643,7 +1643,7 @@ pmemobj_tx_xalloc(size_t size, uint64_t type_num, uint64_t flags)
  * pmemobj_tx_realloc -- resizes an existing object
  */
 PMEMoid
-pmemobj_tx_realloc(PMEMoid oid, size_t size, uint64_t type_num)
+pmemobj_tx_realloc_unsafe(PMEMoid oid, size_t size, uint64_t type_num)
 {
 	LOG(3, NULL);
 	struct tx *tx = get_tx();
@@ -1662,7 +1662,7 @@ pmemobj_tx_realloc(PMEMoid oid, size_t size, uint64_t type_num)
  * pmemobj_zrealloc -- resizes an existing object, any new space is zeroed.
  */
 PMEMoid
-pmemobj_tx_zrealloc(PMEMoid oid, size_t size, uint64_t type_num)
+pmemobj_tx_zrealloc_unsafe(PMEMoid oid, size_t size, uint64_t type_num)
 {
 	LOG(3, NULL);
 	struct tx *tx = get_tx();
@@ -1799,7 +1799,7 @@ pmemobj_tx_wcsdup(const wchar_t *s, uint64_t type_num)
  * pmemobj_tx_xfree -- frees an existing object, with no_abort option
  */
 int
-pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
+pmemobj_tx_xfree_unsafe(PMEMoid oid, uint64_t flags)
 {
 	LOG(3, NULL);
 
@@ -1874,7 +1874,7 @@ pmemobj_tx_xfree(PMEMoid oid, uint64_t flags)
  * pmemobj_tx_free -- frees an existing object
  */
 int
-pmemobj_tx_free(PMEMoid oid)
+pmemobj_tx_free_unsafe(PMEMoid oid)
 {
 	return pmemobj_tx_xfree(oid, 0);
 }
