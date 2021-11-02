@@ -2163,6 +2163,8 @@ constructor_alloc(void *ctx, void *ptr, size_t usable_size, void *arg)
 	return ret;
 }
 
+
+#ifdef SPP_OFF
 /*
  * obj_alloc_construct -- (internal) allocates a new object with constructor
  */
@@ -2185,9 +2187,52 @@ obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 
 	struct operation_context *ctx = pmalloc_operation_hold(pop);
 
-	if (oidp)
+	if (oidp) {
 		operation_add_entry(ctx, &oidp->pool_uuid_lo, pop->uuid_lo,
 				ULOG_OPERATION_SET);
+	}
+
+	int ret = palloc_operation(&pop->heap, 0,
+			oidp != NULL ? &oidp->off : NULL, size,
+			constructor_alloc, &carg, type_num, 0,
+			CLASS_ID_FROM_FLAG(flags), ARENA_ID_FROM_FLAG(flags),
+			ctx);}
+
+	pmalloc_operation_release(pop);
+
+	return ret;
+}
+
+#else
+
+/*
+ * obj_alloc_construct -- (internal) allocates a new object with constructor
+ */
+static int
+obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
+	type_num_t type_num, uint64_t flags,
+	pmemobj_constr constructor, void *arg)
+{
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		errno = ENOMEM;
+		return -1;
+	}
+
+	struct constr_args carg;
+
+	carg.zero_init = flags & POBJ_FLAG_ZERO;
+	carg.constructor = constructor;
+	carg.arg = arg;
+
+	struct operation_context *ctx = pmalloc_operation_hold(pop);
+
+	if (oidp) {
+		operation_add_entry(ctx, &oidp->pool_uuid_lo, pop->uuid_lo,
+				ULOG_OPERATION_SET);
+		operation_add_entry(ctx, &oidp->size, size,
+				ULOG_OPERATION_SET);
+	}
 
 	int ret = palloc_operation(&pop->heap, 0,
 			oidp != NULL ? &oidp->off : NULL, size,
@@ -2195,14 +2240,12 @@ obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 			CLASS_ID_FROM_FLAG(flags), ARENA_ID_FROM_FLAG(flags),
 			ctx);
 
-	if (ret == 0) {
-		oidp->size = size;
-	}
-
 	pmalloc_operation_release(pop);
 
 	return ret;
 }
+#endif
+
 
 /*
  * pmemobj_alloc -- allocates a new object
@@ -2308,6 +2351,8 @@ pmemobj_zalloc_unsafe(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 	return ret;
 }
 
+#ifdef SPP_OFF
+
 /*
  * obj_free -- (internal) free an object
  */
@@ -2325,6 +2370,30 @@ obj_free(PMEMobjpool *pop, PMEMoid *oidp)
 
 	pmalloc_operation_release(pop);
 }
+
+#else
+
+/*
+ * obj_free -- (internal) free an object
+ */
+static void
+obj_free(PMEMobjpool *pop, PMEMoid *oidp)
+{
+	ASSERTne(oidp, NULL);
+
+	struct operation_context *ctx = pmalloc_operation_hold(pop);
+
+	operation_add_entry(ctx, &oidp->pool_uuid_lo, 0, ULOG_OPERATION_SET);
+
+	operation_add_entry(ctx, &oidp->size, 0, ULOG_OPERATION_SET);
+
+	palloc_operation(&pop->heap, oidp->off, &oidp->off, 0, NULL, NULL,
+			0, 0, 0, 0, ctx);
+
+	pmalloc_operation_release(pop);
+}
+
+#endif
 
 /*
  * constructor_realloc -- (internal) constructor for pmemobj_realloc
@@ -2353,6 +2422,8 @@ constructor_realloc(void *ctx, void *ptr, size_t usable_size, void *arg)
 
 	return 0;
 }
+
+#ifdef SPP_OFF
 
 /*
  * obj_realloc_common -- (internal) common routine for resizing
@@ -2403,6 +2474,62 @@ obj_realloc_common(PMEMobjpool *pop,
 
 	return ret;
 }
+
+#else
+
+/*
+ * obj_realloc_common -- (internal) common routine for resizing
+ *                          existing objects
+ */
+static int
+obj_realloc_common(PMEMobjpool *pop,
+	PMEMoid *oidp, size_t size, type_num_t type_num, int zero_init)
+{
+	/* if OID is NULL just allocate memory */
+	if (OBJ_OID_IS_NULL(*oidp)) {
+		/* if size is 0 - do nothing */
+		if (size == 0)
+			return 0;
+
+		return obj_alloc_construct(pop, oidp, size, type_num,
+				POBJ_FLAG_ZERO, NULL, NULL);
+	}
+
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		errno = ENOMEM;
+		return -1;
+	}
+
+	/* if size is 0 just free */
+	if (size == 0) {
+		obj_free(pop, oidp);
+		return 0;
+	}
+
+	struct carg_realloc carg;
+	carg.ptr = OBJ_OFF_TO_PTR(pop, oidp->off);
+	carg.new_size = size;
+	carg.old_size = pmemobj_alloc_usable_size(*oidp);
+	carg.user_type = type_num;
+	carg.constructor = NULL;
+	carg.arg = NULL;
+	carg.zero_init = zero_init;
+
+	struct operation_context *ctx = pmalloc_operation_hold(pop);
+	
+	operation_add_entry(ctx, &oidp->size, size, ULOG_OPERATION_SET);
+
+	int ret = palloc_operation(&pop->heap, oidp->off, &oidp->off,
+			size, constructor_realloc, &carg, type_num,
+			0, 0, 0, ctx);
+
+	pmalloc_operation_release(pop);
+
+	return ret;
+}
+
+#endif
 
 /*
  * constructor_zrealloc_root -- (internal) constructor for pmemobj_root
@@ -2811,8 +2938,11 @@ struct carg_root {
 	void *arg;
 };
 
+
+#ifdef SPP_OFF
+
 /*
- * obj_realloc_root -- (internal) reallocate root object
+ * obj_alloc_root -- (internal) reallocate root object
  */
 static int
 obj_alloc_root(PMEMobjpool *pop, size_t size,
@@ -2845,6 +2975,44 @@ obj_alloc_root(PMEMobjpool *pop, size_t size,
 	return ret;
 }
 
+#else
+
+/*
+ * obj_alloc_root -- (internal) reallocate root object
+ */
+static int
+obj_alloc_root(PMEMobjpool *pop, size_t size,
+	pmemobj_constr constructor, void *arg)
+{
+	LOG(3, "pop %p size %zu", pop, size);
+
+	struct carg_realloc carg;
+
+	carg.ptr = OBJ_OFF_TO_PTR(pop, pop->root_offset);
+	carg.old_size = pop->root_size;
+	carg.new_size = size;
+	carg.user_type = POBJ_ROOT_TYPE_NUM;
+	carg.constructor = constructor;
+	carg.zero_init = 1;
+	carg.arg = arg;
+
+	struct operation_context *ctx = pmalloc_operation_hold(pop);
+
+	operation_add_entry(ctx, &pop->root_size, size, ULOG_OPERATION_SET);
+
+	int ret = palloc_operation(&pop->heap, pop->root_offset,
+			&pop->root_offset, size,
+			constructor_zrealloc_root, &carg,
+			POBJ_ROOT_TYPE_NUM, OBJ_INTERNAL_OBJECT_MASK,
+			0, 0, ctx);
+
+	pmalloc_operation_release(pop);
+
+	return ret;
+}
+
+#endif
+
 /*
  * pmemobj_root_size -- returns size of the root object
  */
@@ -2859,6 +3027,7 @@ pmemobj_root_size(PMEMobjpool *pop)
 		return 0;
 }
 
+#ifdef SPP_OFF
 /*
  * pmemobj_root_construct -- returns root object
  */
@@ -2897,13 +3066,62 @@ pmemobj_root_construct(PMEMobjpool *pop, size_t size,
 
 	root.pool_uuid_lo = pop->uuid_lo;
 	root.off = pop->root_offset;
-	root.size = size;
 
 	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
 
 	PMEMOBJ_API_END();
 	return root;
 }
+
+#else
+
+/*
+ * pmemobj_root_construct -- returns root object
+ */
+PMEMoid
+pmemobj_root_construct(PMEMobjpool *pop, size_t size,
+	pmemobj_constr constructor, void *arg)
+{
+	LOG(3, "pop %p size %zu constructor %p args %p", pop, size, constructor,
+		arg);
+
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		errno = ENOMEM;
+		return OID_NULL;
+	}
+
+	if (size == 0 && pop->root_offset == 0) {
+		ERR("requested size cannot equals zero");
+		errno = EINVAL;
+		return OID_NULL;
+	}
+
+	PMEMOBJ_API_START();
+
+	PMEMoid root;
+
+	pmemobj_mutex_lock_nofail(pop, &pop->rootlock);
+
+	if (size > pop->root_size &&
+		obj_alloc_root(pop, size, constructor, arg)) {
+		pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
+		LOG(2, "obj_realloc_root failed");
+		PMEMOBJ_API_END();
+		return OID_NULL;
+	}
+
+	root.pool_uuid_lo = pop->uuid_lo;
+	root.size = size;
+	root.off = pop->root_offset;
+
+	pmemobj_mutex_unlock_nofail(pop, &pop->rootlock);
+
+	PMEMOBJ_API_END();
+	return root;
+}
+
+#endif
 
 /*
  * pmemobj_root -- returns root object

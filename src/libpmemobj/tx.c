@@ -565,6 +565,8 @@ tx_lane_ranges_insert_def(PMEMobjpool *pop, struct tx *tx,
 	return ret;
 }
 
+#ifdef SPP_OFF
+
 /*
  * tx_alloc_common -- (internal) common function for alloc and zalloc
  */
@@ -594,7 +596,6 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 	PMEMoid retoid = OID_NULL;
 	retoid.off = action->heap.offset;
 	retoid.pool_uuid_lo = pop->uuid_lo;
-	size = action->heap.usable_size;
 
 	const struct tx_range_def r = {retoid.off, size, args.flags};
 	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
@@ -607,6 +608,56 @@ err_oom:
 	ERR("out of memory");
 	return obj_tx_fail_null(ENOMEM, args.flags);
 }
+
+#else
+
+/*
+ * tx_alloc_common -- (internal) common function for alloc and zalloc
+ */
+static PMEMoid
+tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
+		palloc_constr constructor, struct tx_alloc_args args)
+{
+	LOG(3, NULL);
+
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		return obj_tx_fail_null(ENOMEM, args.flags);
+	}
+
+	PMEMobjpool *pop = tx->pop;
+
+	struct pobj_action *action = tx_action_add(tx);
+	if (action == NULL)
+		return obj_tx_fail_null(ENOMEM, args.flags);
+
+	if (palloc_reserve(&pop->heap, size, constructor, &args, type_num, 0,
+		CLASS_ID_FROM_FLAG(args.flags),
+		ARENA_ID_FROM_FLAG(args.flags), action) != 0)
+		goto err_oom;
+
+	/* allocate object to undo log */
+	PMEMoid retoid = OID_NULL;
+	retoid.off = action->heap.offset;
+	retoid.pool_uuid_lo = pop->uuid_lo;
+	retoid.size = size;
+
+	const struct tx_range_def r = {retoid.off, size, args.flags};
+	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
+		goto err_oom;
+
+	return retoid;
+
+err_oom:
+	tx_action_remove(tx);
+	ERR("out of memory");
+	return obj_tx_fail_null(ENOMEM, args.flags);
+}
+
+#endif
+
+
+#ifdef SPP_OFF
 
 /*
  * tx_realloc_common -- (internal) common function for tx realloc
@@ -660,6 +711,63 @@ tx_realloc_common(struct tx *tx, PMEMoid oid, size_t size, uint64_t type_num,
 
 	return new_obj;
 }
+
+#else
+
+/*
+ * tx_realloc_common -- (internal) common function for tx realloc
+ */
+static PMEMoid
+tx_realloc_common(struct tx *tx, PMEMoid oid, size_t size, uint64_t type_num,
+	palloc_constr constructor_alloc,
+	palloc_constr constructor_realloc,
+	uint64_t flags)
+{
+	LOG(3, NULL);
+
+	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
+		ERR("requested size too large");
+		return obj_tx_fail_null(ENOMEM, flags);
+	}
+
+	/* if oid is NULL just alloc */
+	if (OBJ_OID_IS_NULL(oid))
+		return tx_alloc_common(tx, size, (type_num_t)type_num,
+				constructor_alloc, ALLOC_ARGS(flags));
+
+	ASSERT(OBJ_OID_IS_VALID(tx->pop, oid));
+
+	/* if size is 0 just free */
+	if (size == 0) {
+		if (pmemobj_tx_free(oid)) {
+			ERR("pmemobj_tx_free failed");
+			return oid;
+		} else {
+			return OID_NULL;
+		}
+	}
+
+	/* oid is not NULL and size is not 0 so do realloc by alloc and free */
+	void *ptr = OBJ_OFF_TO_PTR(tx->pop, oid.off);
+	size_t old_size = palloc_usable_size(&tx->pop->heap, oid.off);
+
+	size_t copy_size = old_size < size ? old_size : size;
+
+	PMEMoid new_obj = tx_alloc_common(tx, size, (type_num_t)type_num,
+			constructor_realloc, COPY_ARGS(flags, ptr, copy_size));
+
+	if (!OBJ_OID_IS_NULL(new_obj)) {
+		if (pmemobj_tx_free(oid)) {
+			ERR("pmemobj_tx_free failed");
+			VEC_POP_BACK(&tx->actions);
+			return OID_NULL;
+		}
+	}
+
+	return new_obj;
+}
+
+#endif
 
 /*
  * tx_construct_user_buffer -- add user buffer to the ulog
