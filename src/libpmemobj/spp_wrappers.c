@@ -127,12 +127,18 @@ int pmemobj_tx_add_range(PMEMoid oid, uint64_t hoff, size_t size) {
     return pmemobj_tx_add_range_unsafe(oid, hoff, size);
 }
 
-/* TODO: check the snapshotting range in PMDK runtime if it's not already done */
+/* 
+ * check the snapshotting range in PMDK runtime if it's not already done :
+ * *ptr is derived from pmemobj_direct function -- compiler pass is responsible for the handling 
+ */
 int pmemobj_tx_add_range_direct(const void *ptr, size_t size) {
     return pmemobj_tx_add_range_direct_unsafe(ptr, size);
 }
 
-/* TODO: check the snapshotting range in PMDK runtime if it's not already done */
+/* 
+ * check the snapshotting range in PMDK runtime if it's not already done :
+ * *ptr is derived from pmemobj_direct function -- compiler pass is responsible for the handling 
+ */
 int pmemobj_tx_xadd_range_direct(const void *ptr, size_t size, uint64_t flags) {
     return pmemobj_tx_xadd_range_direct_unsafe(ptr, size, flags);
 }

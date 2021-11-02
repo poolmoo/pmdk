@@ -1562,6 +1562,8 @@ pmemobj_tx_xadd_range_direct_unsafe(const void *ptr, size_t size, uint64_t flags
 	return ret;
 }
 
+#ifdef SPP_OFF
+
 /*
  * pmemobj_tx_add_range -- adds persistent memory range into the transaction
  */
@@ -1645,6 +1647,94 @@ pmemobj_tx_xadd_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size, uint64_t f
 	PMEMOBJ_API_END();
 	return ret;
 }
+
+#else
+
+/*
+ * pmemobj_tx_add_range -- adds persistent memory range into the transaction
+ */
+int
+pmemobj_tx_add_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size)
+{
+	LOG(3, NULL);
+
+	PMEMOBJ_API_START();
+	struct tx *tx = get_tx();
+
+	ASSERT_IN_TX(tx);
+	ASSERT_TX_STAGE_WORK(tx);
+
+	int ret;
+
+	uint64_t flags = tx_abort_on_failure_flag(tx);
+
+	if (oid.pool_uuid_lo != tx->pop->uuid_lo) {
+		ERR("invalid pool uuid");
+		ret = obj_tx_fail_err(EINVAL, flags);
+		PMEMOBJ_API_END();
+		return ret;
+	}
+	ASSERT(OBJ_OID_RANGE_IS_VALID(tx->pop, oid, hoff, size));
+
+	struct tx_range_def args = {
+		.offset = oid.off + hoff,
+		.size = size,
+		.flags = flags,
+	};
+
+	ret = pmemobj_tx_add_common(tx, &args);
+
+	PMEMOBJ_API_END();
+	return ret;
+}
+
+/*
+ * pmemobj_tx_xadd_range -- adds persistent memory range into the transaction
+ */
+int
+pmemobj_tx_xadd_range_unsafe(PMEMoid oid, uint64_t hoff, size_t size, uint64_t flags)
+{
+	LOG(3, NULL);
+
+	PMEMOBJ_API_START();
+	struct tx *tx = get_tx();
+
+	ASSERT_IN_TX(tx);
+	ASSERT_TX_STAGE_WORK(tx);
+
+	int ret;
+
+	flags |= tx_abort_on_failure_flag(tx);
+
+	if (flags & ~POBJ_XADD_VALID_FLAGS) {
+		ERR("unknown flags 0x%" PRIx64, flags
+			& ~POBJ_XADD_VALID_FLAGS);
+		ret = obj_tx_fail_err(EINVAL, flags);
+		PMEMOBJ_API_END();
+		return ret;
+	}
+
+	if (oid.pool_uuid_lo != tx->pop->uuid_lo) {
+		ERR("invalid pool uuid");
+		ret = obj_tx_fail_err(EINVAL, flags);
+		PMEMOBJ_API_END();
+		return ret;
+	}
+	ASSERT(OBJ_OID_RANGE_IS_VALID(tx->pop, oid, hoff, size));
+
+	struct tx_range_def args = {
+		.offset = oid.off + hoff,
+		.size = size,
+		.flags = flags,
+	};
+
+	ret = pmemobj_tx_add_common(tx, &args);
+
+	PMEMOBJ_API_END();
+	return ret;
+}
+
+#endif
 
 /*
  * pmemobj_tx_alloc -- allocates a new object

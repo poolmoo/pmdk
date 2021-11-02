@@ -238,6 +238,19 @@ OBJ_OID_IS_VALID(PMEMobjpool *pop, PMEMoid oid)
 		    oid.off < pop->heap_offset + pop->heap_size);
 }
 
+/*
+ * OBJ_OID_RANGE_IS_VALID_ -- (internal) checks if 'oid' range is valid
+ */
+static inline int
+OBJ_OID_RANGE_IS_VALID(PMEMobjpool *pop, PMEMoid oid, uint64_t hoff, size_t size)
+{
+	return OBJ_OID_IS_NULL(oid) ||
+		(oid.pool_uuid_lo == pop->uuid_lo &&
+		    oid.off >= pop->heap_offset &&
+		    oid.off < pop->heap_offset + pop->heap_size &&
+			hoff + size <= oid.size);
+}
+
 static inline int
 OBJ_OFF_IS_VALID_FROM_CTX(void *ctx, uint64_t offset)
 {
