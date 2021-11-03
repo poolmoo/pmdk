@@ -33,6 +33,11 @@ DEFAULT_CFLAGS += -Wpointer-arith
 DEFAULT_CFLAGS += -Wsign-conversion
 DEFAULT_CFLAGS += -Wsign-compare
 
+#if SPP_OFF is set, enable PMDK's original functions
+ifeq ($(SPP_OFF),1)
+DEFAULT_CFLAGS += -DSPP_OFF
+endif
+
 ifeq ($(WCONVERSION_AVAILABLE), y)
 DEFAULT_CFLAGS += -Wconversion
 endif

@@ -2196,7 +2196,7 @@ obj_alloc_construct(PMEMobjpool *pop, PMEMoid *oidp, size_t size,
 			oidp != NULL ? &oidp->off : NULL, size,
 			constructor_alloc, &carg, type_num, 0,
 			CLASS_ID_FROM_FLAG(flags), ARENA_ID_FROM_FLAG(flags),
-			ctx);}
+			ctx);
 
 	pmalloc_operation_release(pop);
 
