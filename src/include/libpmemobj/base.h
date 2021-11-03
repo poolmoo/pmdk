@@ -82,6 +82,21 @@ typedef struct pmemobjpool PMEMobjpool;
 /*
  * Object handle
  */
+#ifdef SPP_OFF
+
+typedef struct pmemoid {
+	uint64_t pool_uuid_lo;
+	uint64_t off;
+} PMEMoid;
+
+static const PMEMoid OID_NULL = { 0, 0};
+#define OID_IS_NULL(o)	((o).off == 0)
+#define OID_EQUALS(lhs, rhs)\
+((lhs).off == (rhs).off &&\
+	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo)
+
+#else
+
 typedef struct pmemoid {
 	uint64_t pool_uuid_lo;
 	uint64_t off;
@@ -96,11 +111,7 @@ static const PMEMoid OID_NULL = { 0, 0, 0 };
 	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo &&\
 	(lhs).size == (rhs).size)
 
-/*
-#define OID_EQUALS(lhs, rhs)\
-((lhs).off == (rhs).off &&\
-	(lhs).pool_uuid_lo == (rhs).pool_uuid_lo)
-*/
+#endif
 
 PMEMobjpool *pmemobj_pool_by_ptr(const void *addr);
 PMEMobjpool *pmemobj_pool_by_oid(PMEMoid oid);

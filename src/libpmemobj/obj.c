@@ -240,7 +240,12 @@ pmemobj_oid(const void *addr)
 	if (pop == NULL)
 		return OID_NULL;
 
+#ifdef SPP_OFF
+	PMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop};
+#else
 	PMEMoid oid = {pop->uuid_lo, (uintptr_t)addr - (uintptr_t)pop, 0};
+#endif
+
 	return oid;
 }
 
@@ -3145,7 +3150,11 @@ pmemobj_first_unsafe(PMEMobjpool *pop)
 {
 	LOG(3, "pop %p", pop);
 
+#ifdef SPP_OFF
+	PMEMoid ret = {0, 0};
+#else
 	PMEMoid ret = {0, 0, 0};
+#endif
 
 	uint64_t off = palloc_first(&pop->heap);
 	if (off != 0) {
@@ -3212,7 +3221,10 @@ pmemobj_reserve(PMEMobjpool *pop, struct pobj_action *act,
 
 	oid.off = act->heap.offset;
 	oid.pool_uuid_lo = pop->uuid_lo;
+
+#ifndef SPP_OFF
 	oid.size = size;
+#endif
 
 	PMEMOBJ_API_END();
 	return oid;
@@ -3254,7 +3266,10 @@ pmemobj_xreserve(PMEMobjpool *pop, struct pobj_action *act,
 
 	oid.off = act->heap.offset;
 	oid.pool_uuid_lo = pop->uuid_lo;
+
+#ifndef SPP_OFF
 	oid.size = size;
+#endif
 
 	PMEMOBJ_API_END();
 	return oid;
