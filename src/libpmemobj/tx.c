@@ -596,6 +596,7 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 	PMEMoid retoid = OID_NULL;
 	retoid.off = action->heap.offset;
 	retoid.pool_uuid_lo = pop->uuid_lo;
+	size = action->heap.usable_size;
 
 	const struct tx_range_def r = {retoid.off, size, args.flags};
 	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
@@ -619,6 +620,7 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 		palloc_constr constructor, struct tx_alloc_args args)
 {
 	LOG(3, NULL);
+	size_t orig_size = size;
 
 	if (size > PMEMOBJ_MAX_ALLOC_SIZE) {
 		ERR("requested size too large");
@@ -640,7 +642,9 @@ tx_alloc_common(struct tx *tx, size_t size, type_num_t type_num,
 	PMEMoid retoid = OID_NULL;
 	retoid.off = action->heap.offset;
 	retoid.pool_uuid_lo = pop->uuid_lo;
-	retoid.size = size;
+	retoid.size = orig_size;
+	
+	size = action->heap.usable_size; //update size
 
 	const struct tx_range_def r = {retoid.off, size, args.flags};
 	if (tx_lane_ranges_insert_def(pop, tx, &r) != 0)
