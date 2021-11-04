@@ -122,6 +122,16 @@ CXXFLAGS += -fsanitize=$(SANITIZE)
 LDFLAGS += -fsanitize=$(SANITIZE)
 endif
 
+#if SPP_OFF is set, enable PMDK's original functions
+ifeq ($(SPP_OFF),1)
+CXXFLAGS += -DSPP_OFF
+endif
+
+#if TAG_BITS is defined, propagate its value
+ifneq ($(TAG_BITS), )
+CXXFLAGS += -DTAG_BITS=$(TAG_BITS)
+endif
+
 ifeq ($(BUILD_RPMEM),y)
 SRC += rpmem.cpp
 LIBS += -lrpmem $(LIBFABRIC_LIBS)

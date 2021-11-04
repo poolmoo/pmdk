@@ -26,6 +26,19 @@ endif
 INCS = -I$(INCDIR) -I. -I$(TOP_SRC)/examples $(OS_INCS)
 LIBS += $(OS_LIBS) $(LIBUUID)
 
+#if SPP_OFF is set, enable PMDK's original functions
+ifeq ($(SPP_OFF),1)
+CFLAGS += -DSPP_OFF
+CXXFLAGS += -DSPP_OFF
+endif
+
+#if TAG_BITS is defined, propagate its value
+ifneq ($(TAG_BITS), )
+CFLAGS += -DTAG_BITS=$(TAG_BITS)
+CXXFLAGS += -DTAG_BITS=$(TAG_BITS)
+endif
+
+
 LINKER=$(CC)
 ifeq ($(COMPILE_LANG), cpp)
 LINKER=$(CXX)

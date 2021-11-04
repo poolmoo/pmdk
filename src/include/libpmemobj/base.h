@@ -15,6 +15,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef DEBUG
+#include <assert.h>
+#endif
+
 #ifdef _WIN32
 #include <pmemcompat.h>
 
@@ -80,6 +84,39 @@ typedef struct pmemobjpool PMEMobjpool;
  */
 
 /*
+ * Determine pointer size
+ */
+#if _WIN32 || _WIN64
+#if _WIN64
+#define PTR_SIZE 64
+#else
+#error Only 64bit machines are supported
+#endif
+#endif
+
+#if __GNUC__
+#if __x86_64__ || __ppc64__
+#define PTR_SIZE 64
+#else
+#error Only 64bit machines are supported
+#endif
+#endif
+
+/*
+ * Delta pointer structure
+ */
+#ifndef TAG_BITS
+#define TAG_BITS 24 //16MB maximum allocation size - 1TB address space
+#endif
+
+#define OVERFLOW_BITS 1
+#define ADDRESS_BITS (PTR_SIZE - TAG_BITS - OVERFLOW_BITS)
+
+#define OVERFLOW_SET (~((uint64_t)1 << (PTR_SIZE - 1)))
+
+#define MAX_OBJ_SIZE ((uint64_t)1 << TAG_BITS)
+
+/*
  * Object handle
  */
 #ifdef SPP_OFF
@@ -89,7 +126,7 @@ typedef struct pmemoid {
 	uint64_t off;
 } PMEMoid;
 
-static const PMEMoid OID_NULL = { 0, 0};
+static const PMEMoid OID_NULL = { 0, 0 };
 #define OID_IS_NULL(o)	((o).off == 0)
 #define OID_EQUALS(lhs, rhs)\
 ((lhs).off == (rhs).off &&\
@@ -125,6 +162,8 @@ extern __thread struct _pobj_pcache {
 	int invalidate;
 } _pobj_cached_pool;
 
+#ifdef SPP_OFF
+
 /*
  * Returns the direct pointer of an object.
  */
@@ -149,6 +188,46 @@ pmemobj_direct_inline(PMEMoid oid)
 
 	return (void *)((uintptr_t)cache->pop + oid.off);
 }
+
+#else
+
+/*
+ * Returns the direct pointer of an object.
+ */
+static inline void *
+pmemobj_direct_inline(PMEMoid oid)
+{
+	if (oid.off == 0 || oid.pool_uuid_lo == 0)
+		return NULL;
+
+	struct _pobj_pcache *cache = &_pobj_cached_pool;
+	if (_pobj_cache_invalidate != cache->invalidate ||
+			cache->uuid_lo != oid.pool_uuid_lo) {
+		cache->invalidate = _pobj_cache_invalidate;
+
+		if (!(cache->pop = pmemobj_pool_by_oid(oid))) {
+			cache->uuid_lo = 0;
+			return NULL;
+		}
+
+		cache->uuid_lo = oid.pool_uuid_lo;
+	}
+
+#if 0 // to be enabled along with the compiler pass
+#ifdef DEBUG
+	//Check that size fits in the indexed tag bits
+	assert(oid.size < MAX_OBJ_SIZE);
+#endif
+
+	//Take the two's complement of the size and place it in the tag
+	uint64_t tag = (~oid.size + 1) << ADDRESS_BITS;	
+	return (void *)( ( ((uintptr_t)cache->pop + oid.off) | tag ) & OVERFLOW_SET);
+#endif
+
+	return (void *)((uintptr_t)cache->pop + oid.off);
+}
+
+#endif
 
 #endif /* _WIN32 */
 

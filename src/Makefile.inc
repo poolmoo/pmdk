@@ -38,6 +38,13 @@ ifeq ($(SPP_OFF),1)
 DEFAULT_CFLAGS += -DSPP_OFF
 endif
 
+#if TAG_BITS is defined, propagate its value
+ifneq ($(TAG_BITS), )
+DEFAULT_CFLAGS += -DTAG_BITS=$(TAG_BITS)
+DEBUG_CFLAGS += -DTAG_BITS=$(TAG_BITS)
+CXXFLAGS += -DTAG_BITS=$(TAG_BITS)
+endif
+
 ifeq ($(WCONVERSION_AVAILABLE), y)
 DEFAULT_CFLAGS += -Wconversion
 endif

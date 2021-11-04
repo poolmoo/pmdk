@@ -475,6 +475,18 @@ CFLAGS += $(COMMON_FLAGS)
 
 CFLAGS += -Wsign-conversion
 
+#if SPP_OFF is set, enable PMDK's original functions
+ifeq ($(SPP_OFF),1)
+CFLAGS += -DSPP_OFF
+CXXFLAGS += -DSPP_OFF
+endif
+
+#if TAG_BITS is defined, propagate its value
+ifneq ($(TAG_BITS), )
+CFLAGS += -DTAG_BITS=$(TAG_BITS)
+CXXFLAGS += -DTAG_BITS=$(TAG_BITS)
+endif
+
 ifeq ($(WUNREACHABLE_CODE_RETURN_AVAILABLE), y)
 CFLAGS += -Wunreachable-code-return
 endif

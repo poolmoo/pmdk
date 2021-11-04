@@ -64,6 +64,18 @@ else
 CFLAGS += -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 $(EXTRA_CFLAGS_RELEASE)
 endif
 
+#if SPP_OFF is set, enable PMDK's original functions
+ifeq ($(SPP_OFF),1)
+CFLAGS += -DSPP_OFF
+CXXFLAGS += -DSPP_OFF
+endif
+
+#if TAG_BITS is defined, propagate its value
+ifneq ($(TAG_BITS), )
+CFLAGS += -DTAG_BITS=$(TAG_BITS)
+CXXFLAGS += -DTAG_BITS=$(TAG_BITS)
+endif
+
 ifeq ($(VALGRIND),0)
 CFLAGS += -DVALGRIND_ENABLED=0
 CXXFLAGS += -DVALGRIND_ENABLED=0
