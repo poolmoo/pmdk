@@ -213,7 +213,7 @@ pmemobj_direct_inline(PMEMoid oid)
 		cache->uuid_lo = oid.pool_uuid_lo;
 	}
 
-#if 0 // to be enabled along with the compiler pass
+//#if 0 // to be enabled along with the compiler pass
 #ifdef DEBUG
 	//Check that size fits in the indexed tag bits
 	assert(oid.size < MAX_OBJ_SIZE);
@@ -222,9 +222,9 @@ pmemobj_direct_inline(PMEMoid oid)
 	//Take the two's complement of the size and place it in the tag
 	uint64_t tag = (~oid.size + 1) << ADDRESS_BITS;	
 	return (void *)( ( ((uintptr_t)cache->pop + oid.off) | tag ) & OVERFLOW_SET);
-#endif
+//#endif
 
-	return (void *)((uintptr_t)cache->pop + oid.off);
+//	return (void *)((uintptr_t)cache->pop + oid.off);
 }
 
 #endif
