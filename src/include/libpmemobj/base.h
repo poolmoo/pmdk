@@ -167,7 +167,12 @@ extern __thread struct _pobj_pcache {
 /*
  * Returns the direct pointer of an object.
  */
+#define SPP_NO_INLINE
+#if !defined(SPP_NO_INLINE)_
 static inline void *
+#else
+static void *
+#endif
 pmemobj_direct_inline(PMEMoid oid)
 {
 	if (oid.off == 0 || oid.pool_uuid_lo == 0)

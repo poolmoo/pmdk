@@ -14,6 +14,8 @@
 #include <limits.h>
 #include <sched.h>
 
+#include <assert.h> // SPP.test
+
 #include "libpmemobj.h"
 #include "critnib.h"
 #include "lane.h"
@@ -507,7 +509,10 @@ lane_hold(PMEMobjpool *pop, struct lane **lanep)
 	 * Before runtime lane initialization all remote operations are
 	 * executed using RLANE_DEFAULT.
 	 */
-	if (unlikely(!pop->lanes_desc.runtime_nlanes)) {
+	// SPP.test
+    assert(pop && "pop is null"); //SPP.test
+
+    if (unlikely(!pop->lanes_desc.runtime_nlanes)) {
 		ASSERT(pop->has_remote_replicas);
 		if (lanep != NULL)
 			FATAL("cannot obtain section before lane's init");

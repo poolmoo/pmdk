@@ -114,7 +114,7 @@ int
 util_is_zeroed(const void *addr, size_t len)
 {
 	const char *a = addr;
-    printf("__SPP> a: 0x%.16" PRIXPTR "\n", (uintptr_t)a);
+    //printf("__SPP> a: 0x%.16" PRIXPTR "\n", (uintptr_t)a);
 	if (len == 0)
 		return 1;
 

@@ -16,6 +16,7 @@
 #include "tx.h"
 #include "valgrind_internal.h"
 #include "memops.h"
+#include <assert.h> //SPP.test
 
 struct tx_data {
 	PMDK_SLIST_ENTRY(tx_data) tx_entry;
@@ -828,7 +829,8 @@ err:
 int
 pmemobj_tx_begin(PMEMobjpool *pop, jmp_buf env, ...)
 {
-	LOG(3, NULL);
+	assert(pop); //SPP.test
+    LOG(3, NULL);
 
 	int err = 0;
 	struct tx *tx = get_tx();
@@ -849,7 +851,8 @@ pmemobj_tx_begin(PMEMobjpool *pop, jmp_buf env, ...)
 		VALGRIND_START_TX;
 	} else if (tx->stage == TX_STAGE_NONE) {
 		VALGRIND_START_TX;
-
+        
+	    //assert(pop); //SPP.test
 		lane_hold(pop, &tx->lane);
 		operation_start(tx->lane->undo);
 
